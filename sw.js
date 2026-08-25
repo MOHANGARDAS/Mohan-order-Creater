@@ -1,6 +1,13 @@
-/* Network-first for app shell so phone always gets latest matching brain */
-const CACHE = "mohan-oc-v6";
-const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./master.json", "./manifest.webmanifest"];
+/* Mohan Order Creater v7 — network-first app shell, offline cache fallback */
+const CACHE = "mohan-oc-v7";
+const ASSETS = [
+  "./",
+  "./index.html",
+  "./styles.css",
+  "./app.js",
+  "./master.json",
+  "./manifest.webmanifest",
+];
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -19,8 +26,10 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
-  // Always try network first for JS/CSS/HTML so fixes go live immediately
-  if (/\.(js|css|html|json|webmanifest)(\?|$)/i.test(url.pathname) || url.pathname.endsWith("/")) {
+
+  const isShell = /\.(js|css|html|json|webmanifest)(\?|$)/i.test(url.pathname) || url.pathname.endsWith("/");
+
+  if (isShell) {
     e.respondWith(
       fetch(e.request)
         .then((res) => {
@@ -30,10 +39,11 @@ self.addEventListener("fetch", (e) => {
           }
           return res;
         })
-        .catch(() => caches.match(e.request))
+        .catch(() => caches.match(e.request).then((c) => c || caches.match("./index.html")))
     );
     return;
   }
+
   e.respondWith(
     caches.match(e.request).then((cached) => {
       const fetched = fetch(e.request)

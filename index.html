@@ -1,47 +1,128 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="description" content="Mohan Order Creater — PO to Material Code" />
+  <meta name="description" content="Mohan Order Creater — PO matching dashboard" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='14' width='64' height='64' fill='%230f766e'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='sans-serif'%3EM%3C/text%3E%3C/svg%3E" />
   <title>Mohan Order Creater</title>
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
 </head>
 <body>
-  <div id="app">
+  <div id="app" class="app">
+    <!-- Top bar -->
     <header class="topbar">
       <div class="brand">
-        <span class="logo">M</span>
-        <div>
+        <span class="logo" aria-hidden="true">M</span>
+        <div class="brand-text">
           <h1>Mohan Order Creater</h1>
-          <p class="sub">PO → Code · Qty · Name</p>
+          <p class="sub">PO → Code · Qty · Name · <span id="buildTag">v7</span></p>
         </div>
       </div>
+      <div class="top-stats" id="topStats" aria-live="polite">
+        <span class="pill">Master <b id="statMaster">0</b></span>
+        <span class="pill">Rules <b id="statRules">0</b></span>
+        <span class="pill">Match <b id="statMatch">—</b></span>
+      </div>
       <div class="top-actions">
-        <button type="button" id="btnNewOrder" class="btn ghost" title="Clear chat for new order">+ New</button>
-        <button type="button" id="btnSettings" class="btn ghost" title="Settings" aria-label="Settings">⚙</button>
+        <button type="button" id="btnTheme" class="btn icon" title="Toggle dark/light">◐</button>
+        <button type="button" id="btnNew" class="btn ghost">+ New</button>
+        <button type="button" id="btnSettings" class="btn icon" title="Settings" aria-label="Settings">⚙</button>
       </div>
     </header>
 
-    <main id="chat" class="chat" aria-live="polite"></main>
-
-    <div id="composerWrap" class="composer-wrap">
-      <div id="attachPreview" class="attach-preview hidden"></div>
-      <div class="composer">
-        <label class="icon-btn" title="Attach PDF, Excel, image or text">
-          📎
-          <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv,.txt,.doc,.docx,image/*" multiple hidden />
-        </label>
-        <textarea id="msgInput" rows="1" placeholder="Message or paste PO…" enterkeyhint="send"></textarea>
-        <button type="button" id="btnSend" class="btn primary" title="Send" aria-label="Send">➤</button>
+    <!-- Learning strip -->
+    <div class="learn-strip" id="learnStrip">
+      <div class="learn-meta">
+        <span>🧠 Learning <b id="learnPct">0%</b></span>
+        <span id="learnDetail">Upload a PO to start</span>
       </div>
-      <p class="hint">PO bhejo → <b>Code | Qty | PO Name</b> · cell/chat se fix → Confirm = rule save</p>
+      <div class="learn-track"><i id="learnBar" style="width:0%"></i></div>
+    </div>
+
+    <!-- Dual pane -->
+    <div class="workspace">
+      <!-- LEFT: source / preview -->
+      <section class="pane pane-left" aria-label="PO source">
+        <div class="pane-head">
+          <h2>PO Source</h2>
+          <div class="pane-head-actions">
+            <label class="btn primary sm">
+              📎 Upload
+              <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv,.txt,image/*" multiple hidden />
+            </label>
+          </div>
+        </div>
+
+        <div id="dropZone" class="drop-zone">
+          <div id="previewEmpty" class="preview-empty">
+            <div class="preview-icon">📄</div>
+            <p><b>Drop PDF / Excel / image</b> or paste text below</p>
+            <p class="muted">Fuzzy match against master.json · offline-ready</p>
+          </div>
+          <div id="previewFrame" class="preview-frame hidden"></div>
+        </div>
+
+        <div class="source-text-wrap">
+          <label class="field-label" for="sourceText">Or paste PO text</label>
+          <textarea id="sourceText" rows="4" placeholder="Paste order lines here…"></textarea>
+        </div>
+
+        <div class="left-footer">
+          <input type="text" id="partyInput" class="input" placeholder="Party (optional)" />
+          <button type="button" id="btnProcess" class="btn primary block">Generate Match</button>
+        </div>
+      </section>
+
+      <!-- RIGHT: results form -->
+      <section class="pane pane-right" aria-label="Match results">
+        <div class="pane-head">
+          <h2>Match Results</h2>
+          <div class="pane-head-actions wrap">
+            <span class="badge-row" id="badgeSummary">
+              <span class="badge g">🟢 <b id="cGreen">0</b></span>
+              <span class="badge y">🟡 <b id="cYellow">0</b></span>
+              <span class="badge r">🔴 <b id="cRed">0</b></span>
+            </span>
+            <button type="button" id="btnFixAll" class="btn sm ghost" disabled>Fix All</button>
+            <button type="button" id="btnCopyExcel" class="btn sm primary" disabled>Copy Excel</button>
+          </div>
+        </div>
+
+        <div class="results-meta" id="resultsMeta">No order yet</div>
+
+        <div class="table-wrap" id="tableWrap">
+          <table class="match-table" id="matchTable">
+            <thead>
+              <tr>
+                <th class="col-st"></th>
+                <th>Code</th>
+                <th>Qty</th>
+                <th>PO Name</th>
+                <th>Pack</th>
+                <th>Conf.</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="matchBody">
+              <tr class="empty-row"><td colspan="7">Upload a PO and press <b>Generate Match</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Assist chat (compact) -->
+        <div class="assist">
+          <div class="assist-log" id="assistLog" aria-live="polite"></div>
+          <div class="assist-compose">
+            <input type="text" id="assistInput" class="input" placeholder="e.g. Chandrika master me check · Benadon 400016004" />
+            <button type="button" id="btnAssist" class="btn primary sm">Send</button>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -50,60 +131,77 @@
     <div class="modal-card">
       <div class="modal-head">
         <h2>Settings</h2>
-        <button type="button" class="btn ghost" id="btnCloseSettings">✕</button>
+        <button type="button" class="btn icon" id="btnCloseSettings" aria-label="Close">✕</button>
       </div>
+
       <label class="field">
-        <span>Gemini API Key <small>(saved only on this device)</small></span>
+        <span>Gemini API Key <small>(this device only)</small></span>
         <div class="row">
-          <input type="password" id="apiKeyInput" placeholder="AIza…" autocomplete="off" />
-          <button type="button" id="btnToggleKey" class="btn ghost">Show</button>
+          <input type="password" id="apiKeyInput" class="input" placeholder="AIza…" autocomplete="off" />
+          <button type="button" id="btnToggleKey" class="btn ghost sm">Show</button>
         </div>
       </label>
+
       <label class="field">
         <span>Model</span>
-        <select id="modelSelect">
-          <option value="gemini-3.6-flash">gemini-3.6-flash (recommended)</option>
-          <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+        <select id="modelSelect" class="input">
+          <option value="gemini-3.6-flash">gemini-3.6-flash</option>
           <option value="gemini-2.5-flash">gemini-2.5-flash</option>
           <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
         </select>
       </label>
+
       <label class="field">
-        <span>Master product file <small>(Excel — Material + Description)</small></span>
+        <span>Master products (Excel)</span>
         <input type="file" id="masterFileInput" accept=".xlsx,.xls,.csv" />
-        <p id="masterStatus" class="status-line">Loading bundled master…</p>
+        <p class="status-line" id="masterStatus">Loading…</p>
       </label>
+
       <div class="field">
-        <span>Rules</span>
-        <p id="rulesStatus" class="status-line">0 rules saved</p>
-        <div class="row gap">
-          <button type="button" id="btnExportRules" class="btn">Export rules JSON</button>
-          <label class="btn">
-            Import rules
-            <input type="file" id="importRulesInput" accept=".json" hidden />
-          </label>
-          <button type="button" id="btnClearRules" class="btn danger">Clear all rules</button>
+        <span>Rules & learning</span>
+        <p class="status-line" id="rulesStatus">0 rules</p>
+        <div class="row wrap gap">
+          <button type="button" id="btnExportRules" class="btn sm">Export JSON</button>
+          <label class="btn sm">Import<input type="file" id="importRulesInput" accept=".json" hidden /></label>
+          <button type="button" id="btnClearRules" class="btn sm danger">Clear rules</button>
         </div>
       </div>
-      <p class="fineprint">API key never goes to GitHub — only your browser. Orders are sent to Google Gemini API for parsing.</p>
+
+      <label class="field row-check">
+        <input type="checkbox" id="chkAutoLearn" checked />
+        <span>Auto-save high-confidence matches as rules</span>
+      </label>
+
+      <p class="fineprint">Codes come from master/rules (local fuzzy match). Gemini only parses messy PO text/PDF. Key never goes to GitHub.</p>
       <button type="button" id="btnSaveSettings" class="btn primary block">Save</button>
     </div>
   </div>
 
-  <!-- Confirm rule modal -->
+  <!-- Confirm -->
   <div id="confirmModal" class="modal hidden" role="dialog" aria-modal="true">
     <div class="modal-card sm">
       <h2>Save rule?</h2>
       <pre id="confirmBody" class="confirm-body"></pre>
-      <div class="row gap end">
+      <div class="row end gap">
         <button type="button" id="btnConfirmNo" class="btn ghost">No</button>
         <button type="button" id="btnConfirmYes" class="btn primary">Yes, save</button>
       </div>
     </div>
   </div>
 
+  <!-- Candidate picker -->
+  <div id="pickModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="pickTitle">Choose match</h2>
+        <button type="button" class="btn icon" id="btnClosePick">✕</button>
+      </div>
+      <div id="pickList" class="pick-list"></div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script src="app.js?v=6" type="module"></script>
+  <script src="app.js?v=7" type="module"></script>
 </body>
 </html>
