@@ -536,11 +536,36 @@ async function processOrder({ text, files }) {
   const rows = (parsed.items || []).map((it) => rowFromItem(it, parsed.party));
   for (const r of rows) applyQtyRules(r);
 
+  // ALWAYS deepen match with master (Chandrika→CHK, plain Alaspan TAB, etc.)
+  for (const r of rows) {
+    if (r.status === "green" && r.code && r.confidence >= 0.9 && r.note === "learned rule") continue;
+    const deep = matchProduct({ poName: r.po_name, pack: r.pack, party: r.party });
+    // Prefer seed/rule green; else take better master result
+    if (deep.code && (r.status !== "green" || (deep.confidence || 0) > (r.confidence || 0) + 0.05 || deep.note.includes("seed") || deep.note.includes("unique") || deep.note.includes("learned"))) {
+      // Don't overwrite a learned rule with weaker yellow
+      if (r.status === "green" && r.note === "learned rule" && deep.status !== "green") {
+        /* keep */
+      } else {
+        r.code = deep.code || r.code;
+        r.status = deep.status;
+        r.master_name = deep.master_name || r.master_name;
+        r.confidence = deep.confidence;
+        r.note = deep.note || r.note;
+        r.candidates = deep.candidates || [];
+      }
+    }
+  }
+
+  // Second pass: force known aliases (Chandrika, etc.) via resolve helpers
+  forceKnownAliases(rows);
+
   // Auto-learn high-confidence matches as soft rules? No — only green with high score optional
   // Auto-save green alias when very strong unique brand match
   let autoLearned = 0;
   for (const r of rows) {
     if (r.status === "green" && r.code && r.confidence >= 0.85 && r.po_name) {
+      // never auto-learn suspected wrong alaspan AM for plain TAB
+      if (/alaspan/i.test(r.po_name) && String(r.code) === "401353008") continue;
       const existed = state.rules.some(
         (x) => norm(x.pattern) === norm(r.po_name) && norm(x.pack || "") === norm(r.pack || "")
       );
@@ -625,6 +650,68 @@ function rowFromItem(it, partyFallback) {
 // ---------- Smart chat ----------
 async function processChatEdit(text) {
   const order = state.activeOrderId ? state.orders.get(state.activeOrderId) : null;
+
+  // 0) If active order exists, ANY mapping/search chat is LOCAL-FIRST (ChatGPT-useless loops stop here)
+  if (order) {
+    const mappingIntent =
+      /(master|check|file|dhoond|dhundh|dhund|search|dekh|match|map|fill|auto|code|alias|soap|tab|cream|fix|sahi|galat|deep|learn|madat|help|dhundo|find|item)/i.test(
+        text
+      ) || text.trim().split(/\s+/).length <= 6;
+
+    if (mappingIntent) {
+      // Apply known aliases first
+      forceKnownAliases(order.rows);
+      const forced = autoResolveFromMaster(order, text, { uniqueOnly: false, forceName: extractFocusName(text, order) || text });
+      // Also try bare search on every weak row
+      for (const row of order.rows) {
+        if (row.status === "green" && row.code) continue;
+        const cands = rankMasterCandidates(row.po_name, row.pack, 5);
+        if (cands.length && (cands[0].score >= 0.55 || isUniqueBrandMatch(row.po_name, cands))) {
+          row.code = cands[0].p.code;
+          row.status = cands[0].score >= 0.72 || isUniqueBrandMatch(row.po_name, cands) ? "green" : "yellow";
+          row.master_name = cands[0].p.name;
+          row.confidence = cands[0].score;
+          row.note = "chat master";
+          row.candidates = cands.map((c) => ({ code: c.p.code, name: c.p.name, score: c.score }));
+          if (row.status === "green") {
+            upsertRule({ pattern: row.po_name, pack: row.pack, code: row.code, note: "chat master" }, { silent: true });
+            bumpStat("rules_learned");
+            bumpStat("cells_fixed");
+          }
+        }
+      }
+      forceKnownAliases(order.rows);
+      const g = order.rows.filter((r) => r.status === "green").length;
+      state.stats.last_order_green = g;
+      state.stats.last_order_total = order.rows.length;
+      saveStats();
+      removeTyping();
+      document.querySelector(`.table-card[data-oid="${state.activeOrderId}"]`)?.remove();
+      renderOrderTable(state.activeOrderId);
+
+      const still = order.rows.filter((r) => r.status !== "green");
+      let msg = `Master + AI-local resolve done.\n🟢 ${g}/${order.rows.length} · Rules ${state.rules.length} · Learning ${learningPercent()}%`;
+      if (still.length) {
+        msg += "\n\nAbhi check:\n" + still
+          .slice(0, 8)
+          .map((r) => {
+            const opts = (r.candidates || []).slice(0, 3).map((c) => c.code).join(", ");
+            return `• ${r.po_name} → ${r.code || "?"} ${opts ? "[" + opts + "]" : ""}`;
+          })
+          .join("\n");
+        msg += "\n\nSahi code cell me likho ya: \"ProductName 401283003\"";
+      } else {
+        msg += "\n\nSab map ho gaya. Copy Excel dabao.";
+      }
+      // Highlight if Chandrika specifically mentioned
+      if (/chandrika|chk/i.test(text)) {
+        const ch = order.rows.find((r) => /chandrika|chk/i.test(r.po_name));
+        if (ch) msg = `✅ Chandrika → ${ch.code || "?"} (${ch.master_name || "CHK Soap"})\n\n` + msg;
+      }
+      addBotText(msg);
+      return;
+    }
+  }
 
   // 1) Fast local intents (no API) — feels instant & smart
   const local = handleLocalIntent(text, order);
@@ -1202,6 +1289,7 @@ function renderOrderTable(orderId) {
     meta.order_no ? " · #" + escapeHtml(String(meta.order_no)) : ""
   } · ${g}/${order.rows.length}</span>
       <span class="badge on">ACTIVE</span>
+      <button type="button" class="btn ghost btn-fixall">Fix All</button>
       <button type="button" class="btn ghost btn-rematch">Rematch</button>
       <button type="button" class="btn ghost btn-copy-codes">Codes</button>
       <button type="button" class="btn ghost btn-copy-qty">Qty</button>
@@ -1268,7 +1356,7 @@ function renderOrderTable(orderId) {
     const body = order.rows.map((r) => `${r.code || ""}\t${r.qty ?? ""}\t${r.po_name || ""}`).join("\n");
     copyText(header + "\n" + body, "Excel ke liye copy ho gaya");
   };
-  card.querySelector(".btn-rematch").onclick = async () => {
+  card.querySelector(".btn-rematch").onclick = () => {
     for (const r of order.rows) {
       const m = matchProduct({ poName: r.po_name, pack: r.pack, party: r.party });
       Object.assign(r, {
@@ -1280,6 +1368,7 @@ function renderOrderTable(orderId) {
         candidates: m.candidates,
       });
     }
+    forceKnownAliases(order.rows);
     const g2 = order.rows.filter((r) => r.status === "green").length;
     state.stats.last_order_green = g2;
     state.stats.last_order_total = order.rows.length;
@@ -1287,6 +1376,31 @@ function renderOrderTable(orderId) {
     card.remove();
     renderOrderTable(orderId);
     addBotText(`Rematch: 🟢 ${g2}/${order.rows.length}`);
+  };
+  card.querySelector(".btn-fixall").onclick = () => {
+    forceKnownAliases(order.rows);
+    for (const r of order.rows) {
+      const m = matchProduct({ poName: r.po_name, pack: r.pack, party: r.party });
+      if (m.code) {
+        r.code = m.code;
+        r.status = m.status === "red" ? "yellow" : m.status;
+        r.master_name = m.master_name;
+        r.confidence = m.confidence;
+        r.note = m.note || "fix all";
+        r.candidates = m.candidates;
+        if (r.status === "green") {
+          upsertRule({ pattern: r.po_name, pack: r.pack, code: r.code, note: "fix all" }, { silent: true });
+        }
+      }
+    }
+    forceKnownAliases(order.rows);
+    const g2 = order.rows.filter((r) => r.status === "green").length;
+    state.stats.last_order_green = g2;
+    state.stats.last_order_total = order.rows.length;
+    saveStats();
+    card.remove();
+    renderOrderTable(orderId);
+    addBotText(`Fix All (master): 🟢 ${g2}/${order.rows.length} · Learning ${learningPercent()}%`);
   };
 
   chatEl.appendChild(card);
@@ -1439,6 +1553,32 @@ const SEED_ALIASES = [
   { pattern: "CALADRYL LOTION", pack: "125ML", code: "401114016", note: "Caladryl Lotion 125Ml" },
 ];
 
+
+function purgeBadRules() {
+  const before = state.rules.length;
+  state.rules = state.rules.filter((r) => {
+    // plain Alaspan TAB must not point to AM code
+    if (/alaspan/i.test(r.pattern || "") && !/am/i.test(r.pattern || "") && String(r.code) === "401353008") return false;
+    return true;
+  });
+  // ensure Chandrika seed always present
+  if (!state.rules.some((r) => /chandrika/i.test(r.pattern || "") && r.code === "401283003")) {
+    state.rules.push({
+      id: "seed_chandrika",
+      pattern: "CHANDRIKA SOAP",
+      pack: "75GM",
+      party: "",
+      pack_exclude: "",
+      code: "401283003",
+      qty_multiple: null,
+      note: "seed",
+      updated_at: new Date().toISOString(),
+    });
+  }
+  if (state.rules.length !== before) saveRules();
+  else saveRules();
+}
+
 function seedAliasRules() {
   let added = 0;
   for (const s of SEED_ALIASES) {
@@ -1457,10 +1597,113 @@ function seedAliasRules() {
   return added;
 }
 
+
+/** Hard deterministic fixes the scorer must never miss */
+function forceKnownAliases(rows) {
+  const fixes = [
+    {
+      test: (r) => /chandrika/i.test(r.po_name) || (brandToken(r.po_name) === "chk" && /soap/i.test(r.po_name)),
+      code: "401283003",
+      master_name: "CHK Soap 75g",
+    },
+    {
+      test: (r) => /alaspan/i.test(r.po_name) && /tab/i.test(r.po_name + " " + r.pack) && !/am|ag|syrup|syp/i.test(r.po_name),
+      code: "401353005",
+      master_name: "Alaspan Tablets-Strip Of 10 Ta",
+    },
+    {
+      test: (r) => /benadon/i.test(r.po_name),
+      code: "400016004",
+      master_name: "BENADON TABLETS 15T",
+    },
+    {
+      test: (r) => /canesten\s*s/i.test(r.po_name) && /15/i.test(r.po_name + r.pack),
+      code: "401376004",
+      master_name: "Canesten S Cream 15G In",
+    },
+    {
+      test: (r) => /mycospor/i.test(r.po_name),
+      code: "401379001",
+      master_name: "Mycospor 1% Crea 1X30 G In",
+    },
+    {
+      test: (r) => /digeplex\s*t/i.test(r.po_name) && /tab/i.test(r.po_name + r.pack),
+      code: "401285008",
+      master_name: "Digeplex-T Tablet 10S",
+    },
+    {
+      test: (r) => /^ferradol/i.test(r.po_name.trim()) && /200/i.test(r.po_name + r.pack),
+      code: "401220002",
+      master_name: "Ferradol 200G",
+    },
+    {
+      test: (r) => /sloan/i.test(r.po_name) && /liniment|71/i.test(r.po_name + r.pack),
+      code: "401210003",
+      master_name: "Sloans Pain Relief Liniment 71ml",
+    },
+    {
+      test: (r) => /supradyn/i.test(r.po_name) && /daily/i.test(r.po_name) && /60/i.test(r.po_name + r.pack),
+      code: "400134046",
+      master_name: "SUPRADYN DAILY TABLETS 60'S BOTTLE",
+    },
+  ];
+  for (const r of rows) {
+    for (const f of fixes) {
+      if (!f.test(r)) continue;
+      // verify code exists in master
+      const m = state.master.find((p) => String(p.code) === f.code);
+      if (!m && state.master.length) continue;
+      r.code = f.code;
+      r.status = "green";
+      r.master_name = (m && m.name) || f.master_name;
+      r.confidence = 1;
+      r.note = "known alias";
+      upsertRule(
+        { pattern: r.po_name, pack: r.pack, code: f.code, note: "known alias" },
+        { silent: true }
+      );
+      break;
+    }
+  }
+}
+
 function matchProduct({ poName, pack, party }) {
   const nPo = norm(poName);
   const nPack = norm(pack);
   if (!nPo) return { status: "red", code: "", note: "empty name" };
+
+  // 0) Deterministic known products (never miss Chandrika / plain Alaspan TAB)
+  if (/chandrika/.test(nPo)) {
+    return { status: "green", code: "401283003", master_name: "CHK Soap 75g", confidence: 1, note: "known alias", candidates: [] };
+  }
+  if (/alaspan/.test(nPo) && /tab/.test(nPo + nPack) && !/\bam\b|\bag\b|syrup|syp/.test(nPo)) {
+    return { status: "green", code: "401353005", master_name: "Alaspan Tablets-Strip Of 10 Ta", confidence: 1, note: "known alias", candidates: [] };
+  }
+  if (/benadon/.test(nPo)) {
+    return { status: "green", code: "400016004", master_name: "BENADON TABLETS 15T", confidence: 1, note: "known alias", candidates: [] };
+  }
+
+  // Seed alias table
+  for (const s of SEED_ALIASES) {
+    const sp = norm(s.pattern);
+    if (!sp) continue;
+    if (!(nPo === sp || nPo.includes(sp) || sp.includes(nPo) || tokenScore(nPo, sp) > 0.85)) continue;
+    if (s.pack) {
+      const pk = norm(s.pack);
+      if (nPack && !(nPack.includes(pk) || pk.includes(nPack) || packLooseEqual(nPack, pk))) {
+        // pack mismatch — allow if pattern is strong exact brand phrase
+        if (!(nPo === sp || nPo.startsWith(sp))) continue;
+      }
+    }
+    return {
+      status: "green",
+      code: s.code,
+      master_name: s.note || "seed",
+      confidence: 0.99,
+      note: "seed alias",
+      candidates: [],
+    };
+  }
 
   // 1) Rules
   let bestRule = null;
