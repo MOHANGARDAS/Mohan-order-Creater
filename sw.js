@@ -1,5 +1,5 @@
 /* Mohan Order Creater v7 — network-first app shell, offline cache fallback */
-const CACHE = "mohan-oc-v7";
+const CACHE = "mohan-oc-v8";
 const ASSETS = [
   "./",
   "./index.html",

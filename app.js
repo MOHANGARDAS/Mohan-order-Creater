@@ -109,6 +109,7 @@ const state = {
   busy: false,
   confirmResolver: null,
   pickResolver: null,
+  apiCooldownUntil: 0, // timestamp ms — block Gemini calls after 429
 };
 
 /* =========================================================
@@ -781,6 +782,17 @@ function toBase64(file) {
    7. GEMINI PARSE (only)
    ========================================================= */
 async function geminiRequest(body) {
+  // Respect cooldown after rate-limit (don't spam free tier)
+  const now = Date.now();
+  if (state.apiCooldownUntil && now < state.apiCooldownUntil) {
+    const sec = Math.ceil((state.apiCooldownUntil - now) / 1000);
+    const err = new Error(
+      `API limit (429). Free tier RPM/RPD full. Wait ~${sec}s then try once. Ya neeche text paste karke Generate dabao.`
+    );
+    err.code = 429;
+    throw err;
+  }
+
   let model = resolveModel(state.model);
   state.model = model;
   const url = (m) =>
@@ -794,8 +806,10 @@ async function geminiRequest(body) {
     body: JSON.stringify(body),
   });
   let data = await res.json().catch(() => ({}));
-  const err = data?.error?.message || "";
-  if (!res.ok && (/no longer available|not found|not supported/i.test(err) || res.status === 404)) {
+  const errMsg = data?.error?.message || "";
+
+  // Only swap model on 404 / retired — NEVER on 429 (that multiplies quota burn)
+  if (!res.ok && res.status !== 429 && (/no longer available|not found|not supported/i.test(errMsg) || res.status === 404)) {
     for (const fb of ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash-lite"]) {
       if (fb === model) continue;
       res = await fetch(url(fb), {
@@ -804,6 +818,7 @@ async function geminiRequest(body) {
         body: JSON.stringify(body),
       });
       data = await res.json().catch(() => ({}));
+      if (res.status === 429) break; // stop fallback chain on rate limit
       if (res.ok) {
         state.model = fb;
         localStorage.setItem(STORAGE.model, fb);
@@ -811,12 +826,23 @@ async function geminiRequest(body) {
       }
     }
   }
+
   if (!res.ok) {
     const msg = data?.error?.message || res.statusText;
-    if (res.status === 429) throw new Error("API limit (429). Wait and retry.");
+    if (res.status === 429) {
+      // 60s cooldown — free tier per-minute limit
+      state.apiCooldownUntil = Date.now() + 60_000;
+      const err = new Error(
+        "API limit (429). Free Gemini quota full (RPM/RPD). 60s wait — baar-baar mat dabao. Photo/PDF ke liye baad me 1 baar try, ya text paste karo."
+      );
+      err.code = 429;
+      throw err;
+    }
     if (/API key/i.test(msg)) throw new Error("Invalid API key — check Settings.");
     throw new Error(msg || "Gemini request failed");
   }
+  // success clears cooldown
+  state.apiCooldownUntil = 0;
   return data;
 }
 
@@ -954,11 +980,26 @@ async function processOrder() {
 
     let parsed;
     if (state.apiKey) {
-      parsed = await parseOrderWithGemini({
-        userText: [partyHint, text].filter(Boolean).join("\n"),
-        localText,
-        parts,
-      });
+      try {
+        parsed = await parseOrderWithGemini({
+          userText: [partyHint, text].filter(Boolean).join("\n"),
+          localText,
+          parts,
+        });
+      } catch (apiErr) {
+        // On 429 / API fail: try local text extract so user is not stuck
+        const fb = localFallbackParse(localText || text || "");
+        if (fb.items.length) {
+          parsed = fb;
+          assist(
+            "bot",
+            `⚠ Gemini limit/error — local text se ${fb.items.length} lines parse kiye (photo-only PO me kam accurate). ` +
+              (apiErr.code === 429 ? "1 minute baad AI parse dubara try karo." : escapeHtml(apiErr.message || ""))
+          );
+        } else {
+          throw apiErr;
+        }
+      }
     } else {
       parsed = localFallbackParse(localText);
       if (!parsed.items.length) {
