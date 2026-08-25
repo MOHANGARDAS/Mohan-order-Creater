@@ -57,6 +57,7 @@ init();
 async function init() {
   setupPdfJs();
   bindUi();
+  setupMobileViewport();
   await loadMaster();
   updateSettingsLabels();
   showWelcome();
@@ -68,6 +69,35 @@ async function init() {
       await navigator.serviceWorker.register("./sw.js");
     } catch (_) {}
   }
+}
+
+/** Keep ChatGPT-like fixed shell when mobile keyboard opens */
+function setupMobileViewport() {
+  const app = document.getElementById("app");
+  if (!app) return;
+
+  const apply = () => {
+    try {
+      if (window.visualViewport) {
+        const vv = window.visualViewport;
+        // Height of visible area (excludes keyboard)
+        const h = Math.round(vv.height);
+        app.style.height = h + "px";
+        app.style.top = Math.round(vv.offsetTop) + "px";
+      } else {
+        app.style.height = window.innerHeight + "px";
+        app.style.top = "0px";
+      }
+    } catch (_) {}
+    scrollChat();
+  };
+
+  apply();
+  window.addEventListener("resize", apply);
+  window.visualViewport?.addEventListener("resize", apply);
+  window.visualViewport?.addEventListener("scroll", apply);
+  msgInput?.addEventListener("focus", () => setTimeout(apply, 50));
+  msgInput?.addEventListener("blur", () => setTimeout(apply, 50));
 }
 
 function setupPdfJs() {
@@ -339,7 +369,9 @@ function removeTyping() {
 }
 
 function scrollChat() {
-  chatEl.scrollTop = chatEl.scrollHeight;
+  requestAnimationFrame(() => {
+    chatEl.scrollTop = chatEl.scrollHeight;
+  });
 }
 
 function renderAttachPreview() {
