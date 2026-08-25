@@ -655,6 +655,19 @@ async function processChatEdit(text) {
     return;
   }
 
+  // 1b) Always try local master resolve before calling Gemini (prevents dumb "give code" loops)
+  if (/master|check|file|dhoond|dhund|search|dekh|match|map|fill|auto|deep|learning|short|chandrika|benadon|alaspan|soap|code/i.test(text)
+      || text.trim().split(/\s+/).length <= 4) {
+    const forced = autoResolveFromMaster(order, text, { uniqueOnly: false });
+    if (forced.updated && /✅|map|Master se/i.test(forced.message)) {
+      removeTyping();
+      document.querySelector(`.table-card[data-oid="${state.activeOrderId}"]`)?.remove();
+      renderOrderTable(state.activeOrderId);
+      addBotText(forced.message);
+      return;
+    }
+  }
+
   // 2) Build master candidates for weak rows for the model
   const weakRows = order.rows
     .map((r, i) => ({ i, r }))
@@ -874,6 +887,59 @@ function handleLocalIntent(text, order) {
     }
   }
 
+  // Bare product name / short Hinglish → ALWAYS search master (no dumb "give me code")
+  if (order && t.length >= 3 && t.length <= 80) {
+    const res = autoResolveFromMaster(order, t, { uniqueOnly: false, forceName: t });
+    if (res.updated) return { rerender: true, message: res.message };
+    // still show master hits for the typed word
+    const hits = searchMaster(t, 8);
+    if (hits.length) {
+      bumpStat("master_lookups");
+      // try map onto matching order rows by brand
+      const b = brandToken(t);
+      let mapped = 0;
+      if (hits.length === 1 || (b && hits.filter((h) => brandToken(h.name) === b || norm(h.name).includes("chk")).length === 1)) {
+        const pick = hits.length === 1 ? hits[0] : hits.find((h) => norm(h.name).includes("chk")) || hits[0];
+        for (const row of order.rows) {
+          if (row.status === "green" && row.code) continue;
+          const rb = brandToken(row.po_name);
+          if (
+            norm(row.po_name).includes(norm(t)) ||
+            norm(t).includes(rb) ||
+            rb === b ||
+            (b === "chk" && /chandrika|chk|soap/i.test(row.po_name)) ||
+            (/chandrika|chk/i.test(t) && /chandrika|chk|soap/i.test(row.po_name))
+          ) {
+            row.code = pick.code;
+            row.status = "green";
+            row.master_name = pick.name;
+            row.note = "name→master";
+            upsertRule({ pattern: row.po_name, pack: row.pack, code: pick.code, note: "chat name" }, { silent: true });
+            mapped++;
+            bumpStat("rules_learned");
+            bumpStat("cells_fixed");
+          }
+        }
+        if (mapped) {
+          const g = order.rows.filter((r) => r.status === "green").length;
+          state.stats.last_order_green = g;
+          state.stats.last_order_total = order.rows.length;
+          saveStats();
+          return {
+            rerender: true,
+            message: `✅ Master se map: ${pick.code} — ${pick.name}\n${mapped} row(s) updated · 🟢 ${g}/${order.rows.length} · Learning ${learningPercent()}%`,
+          };
+        }
+      }
+      return {
+        message:
+          `Master me "${t}" ke results:\n` +
+          hits.map((h, i) => `${i + 1}. ${h.code} — ${h.name}`).join("\n") +
+          `\n\nLikho: "Chandrika ${hits[0].code}" ya sirf code number, ya option 1.`,
+      };
+    }
+  }
+
   return null;
 }
 
@@ -892,13 +958,25 @@ function extractFocusName(text, order) {
   return "";
 }
 
-function autoResolveFromMaster(order, text, { uniqueOnly = false } = {}) {
-  const focus = extractFocusName(text, order);
+function autoResolveFromMaster(order, text, { uniqueOnly = false, forceName = "" } = {}) {
+  const focus = forceName || extractFocusName(text, order);
   const targets = [];
   if (focus) {
+    const nf = norm(focus);
+    const fb = brandToken(focus);
     for (let i = 0; i < order.rows.length; i++) {
       const r = order.rows[i];
-      if (norm(r.po_name).includes(norm(focus)) || norm(focus).includes(brandToken(r.po_name))) {
+      const rn = norm(r.po_name);
+      const rb = brandToken(r.po_name);
+      if (
+        rn.includes(nf) ||
+        nf.includes(rn) ||
+        nf.includes(rb) ||
+        rb === fb ||
+        // Chandrika ↔ CHK soap
+        ((/chandrika|chk/.test(nf) || fb === "chk") && /chandrika|chk|soap/.test(rn)) ||
+        (/chandrika|chk/.test(rn) && (/chandrika|chk/.test(nf) || fb === "chk"))
+      ) {
         targets.push(i);
       }
     }
@@ -1305,20 +1383,28 @@ const STOP = new Set(
 // common PO name → master brand aliases
 const ALIAS_BRAND = {
   chandrika: "chk",
+  chandirka: "chk",
+  chandrika soap: "chk",
   chk: "chk",
+  "chk soap": "chk",
   sloan: "sloans",
   sloans: "sloans",
+  "sloans kills pain": "sloans",
+  "kills pain liniment": "sloans",
   "lacto calamine": "lc",
   lactocalamine: "lc",
   "lc face": "lc",
+  "lc face lotion": "lc",
   caladryl: "caladryl",
   glucovita: "glucovita",
   naturolax: "naturolax",
+  "naturolax-a": "naturolax",
   mycospor: "mycospor",
   canesten: "canesten",
   alaspan: "alaspan",
   benadon: "benadon",
   digeplex: "digeplex",
+  "digeplex t": "digeplex",
   ferradol: "ferradol",
   supradyn: "supradyn",
   neko: "neko",
@@ -1326,7 +1412,50 @@ const ALIAS_BRAND = {
   becozyn: "becozym",
   becozym: "becozym",
   tetmosol: "tetmosol",
+  "i-pill": "i",
+  ipill: "i",
 };
+
+/** Hard PO phrase → preferred material code (seed memory) */
+const SEED_ALIASES = [
+  { pattern: "CHANDRIKA SOAP", pack: "75GM", code: "401283003", note: "CHK Soap 75g" },
+  { pattern: "CHANDRIKA SOAP", pack: "75", code: "401283003", note: "CHK Soap 75g" },
+  { pattern: "CHANDRIKA", pack: "", code: "401283003", note: "CHK Soap 75g" },
+  { pattern: "ALASPAN TAB", pack: "10TAB", code: "401353005", note: "Alaspan Tablets-Strip Of 10" },
+  { pattern: "ALASPAN TAB", pack: "10", code: "401353005", note: "Alaspan Tablets-Strip Of 10" },
+  { pattern: "ALASPAN TABS", pack: "", code: "401353005", note: "Alaspan Tablets-Strip Of 10" },
+  { pattern: "BENADON 40MG TAB", pack: "15TAB", code: "400016004", note: "BENADON TABLETS 15T" },
+  { pattern: "BENADON", pack: "15", code: "400016004", note: "BENADON TABLETS 15T" },
+  { pattern: "CANESTEN S CREAM", pack: "15GM", code: "401376004", note: "Canesten S Cream 15G" },
+  { pattern: "MYCOSPOR CREAM", pack: "30GM", code: "401379001", note: "Mycospor" },
+  { pattern: "DIGEPLEX T TAB", pack: "10TAB", code: "401285008", note: "Digeplex-T Tablet 10S" },
+  { pattern: "FERRADOL", pack: "200GM", code: "401220002", note: "Ferradol 200G" },
+  { pattern: "SLOANS KILLS PAIN LINIMENT", pack: "71ML", code: "401210003", note: "Sloans Liniment 71ml" },
+  { pattern: "SLOANS LINIMENT", pack: "71ML", code: "401210003", note: "Sloans Liniment 71ml" },
+  { pattern: "SUPRADYN DAILY BOTTLE TAB", pack: "60TAB", code: "400134046", note: "Supradyn Daily 60s" },
+  { pattern: "SUPRADYN DAILY", pack: "60", code: "400134046", note: "Supradyn Daily 60s" },
+  { pattern: "NEKO DAILY HYGIENE SOAP", pack: "100GM", code: "401179500", note: "Neko Daily Hygiene Soap" },
+  { pattern: "CALADRYL LOTION", pack: "65ML", code: "401114015", note: "Caladryl Lotion 65Ml" },
+  { pattern: "CALADRYL LOTION", pack: "125ML", code: "401114016", note: "Caladryl Lotion 125Ml" },
+];
+
+function seedAliasRules() {
+  let added = 0;
+  for (const s of SEED_ALIASES) {
+    const exists = state.rules.some(
+      (r) => norm(r.pattern) === norm(s.pattern) && norm(r.pack || "") === norm(s.pack || "") && r.code === s.code
+    );
+    if (exists) continue;
+    // don't overwrite user rule with different code for same pattern+pack
+    const user = state.rules.find(
+      (r) => norm(r.pattern) === norm(s.pattern) && norm(r.pack || "") === norm(s.pack || "")
+    );
+    if (user && user.code && user.note !== "seed") continue;
+    upsertRule({ ...s, note: s.note || "seed" }, { silent: true });
+    added++;
+  }
+  return added;
+}
 
 function matchProduct({ poName, pack, party }) {
   const nPo = norm(poName);
@@ -1444,13 +1573,22 @@ function rankMasterCandidates(poName, pack, limit = 6) {
     for (const p of list) {
       let score = tokenScore(nPo, norm(p.name));
       const pb = brandToken(p.name);
+      const mn = norm(p.name);
       if (b && pb && b === pb) score += 0.28;
       // substring brand
-      if (b && norm(p.name).includes(b)) score += 0.12;
+      if (b && mn.includes(b)) score += 0.12;
+      // Chandrika PO → CHK Soap
+      if (/chandrika/.test(nPo) && (mn.includes("chk") || mn.includes("chandrika"))) score += 0.55;
+      if (/chandrika/.test(nPo) && mn.includes("soap") && (nPack.includes("75") || /75/.test(nPo))) score += 0.25;
+      // Plain ALASPAN TAB (not AM/AG) → prefer plain tablets 401353005 style, not AM
+      if (/alaspan/.test(nPo) && /\btab/.test(nPo) && !/\bam\b|\bag\b|syrup/.test(nPo)) {
+        if (mn.includes("alaspan") && mn.includes("tablet") && !mn.includes(" am ") && !mn.includes("ag ")) score += 0.35;
+        if (mn.includes(" am ") || mn.includes("alaspan am")) score -= 0.4;
+        if (mn.includes("syrup") || mn.includes("ag syrup")) score -= 0.5;
+      }
       // pack / size
       if (nPack) {
         const packNums = nPack.match(/\d+/g) || [];
-        const mn = norm(p.name);
         if (packNums.some((num) => mn.includes(num))) score += 0.14;
         if (packLooseEqual(nPack.replace(/\s/g, ""), mn.replace(/\s/g, ""))) score += 0.1;
         if (isTab(nPo, nPack) && isSyrupName(mn)) score -= 0.45;
@@ -1461,7 +1599,6 @@ function rankMasterCandidates(poName, pack, limit = 6) {
         if (/soap/.test(nPo) && /soap/.test(mn)) score += 0.12;
         if (/liniment|sloan/.test(nPo) && /liniment|sloan/.test(mn)) score += 0.15;
       } else {
-        const mn = norm(p.name);
         if (isTab(nPo, "") && isSyrupName(mn)) score -= 0.35;
         if (isSyrup(nPo, "") && isTabName(mn)) score -= 0.35;
       }
@@ -1494,12 +1631,17 @@ function rankMasterCandidates(poName, pack, limit = 6) {
 function searchMaster(query, limit = 8) {
   const q = norm(query);
   if (!q) return [];
+  const qb = brandToken(query);
   const scored = [];
   for (const p of state.master) {
-    let s = tokenScore(q, norm(p.name));
-    if (norm(p.name).includes(q)) s += 0.3;
+    const pn = norm(p.name);
+    let s = tokenScore(q, pn);
+    if (pn.includes(q)) s += 0.3;
     if (String(p.code).includes(query.trim())) s += 0.5;
-    if (s >= 0.3) scored.push({ ...p, _s: s });
+    if (qb && (brandToken(p.name) === qb || pn.includes(qb))) s += 0.35;
+    if (/chandrika/.test(q) && (pn.includes("chk") || pn.includes("chandrika"))) s += 0.7;
+    if (/chandrika/.test(q) && pn.includes("soap") && pn.includes("75")) s += 0.3;
+    if (s >= 0.25) scored.push({ ...p, _s: s });
   }
   scored.sort((a, b) => b._s - a._s);
   return scored.slice(0, limit);
