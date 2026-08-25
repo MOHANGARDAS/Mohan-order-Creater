@@ -1,7 +1,7 @@
 /**
- * Mohan Order Creater
- * Chat-style PWA: parse PO (any format) via Gemini → match master/rules → Code | Qty | PO Name
- * API key stored only in localStorage (never in repo).
+ * Mohan Order Creater — strong AI + local master tools + learning
+ * Parse PO via Gemini → match master/rules → Code | Qty | PO Name
+ * Chat can search master, fix rows, save rules. API key local only.
  */
 
 const STORAGE = {
@@ -9,6 +9,7 @@ const STORAGE = {
   model: "moc_model",
   rules: "moc_rules_v1",
   master: "moc_master_v1",
+  stats: "moc_stats_v1",
 };
 
 const DEPRECATED_MODELS = {
@@ -23,18 +24,43 @@ function resolveModel(saved) {
   return DEPRECATED_MODELS[m] || m;
 }
 
+function loadJSON(key, fallback) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || "null");
+    return v == null ? fallback : v;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadRules() {
+  return loadJSON(STORAGE.rules, []);
+}
+
+function loadStats() {
+  return loadJSON(STORAGE.stats, {
+    orders_processed: 0,
+    rules_learned: 0,
+    cells_fixed: 0,
+    master_lookups: 0,
+    last_order_green: 0,
+    last_order_total: 0,
+  });
+}
+
 const state = {
   apiKey: localStorage.getItem(STORAGE.apiKey) || "",
   model: resolveModel(localStorage.getItem(STORAGE.model)),
-  master: [], // {code, name, min_qty, case_qty}
+  master: [],
   rules: loadRules(),
+  stats: loadStats(),
   pendingFiles: [],
   activeOrderId: null,
-  orders: new Map(), // id -> { rows, meta }
+  orders: new Map(),
   confirmResolver: null,
+  brandIndex: new Map(),
 };
 
-// Persist migrated model so old devices stop calling retired names
 try {
   localStorage.setItem(STORAGE.model, state.model);
 } catch (_) {}
@@ -51,7 +77,6 @@ const settingsModal = document.getElementById("settingsModal");
 const confirmModal = document.getElementById("confirmModal");
 const confirmBody = document.getElementById("confirmBody");
 
-// ---------- Init ----------
 init();
 
 async function init() {
@@ -59,11 +84,11 @@ async function init() {
   bindUi();
   setupMobileViewport();
   await loadMaster();
+  rebuildBrandIndex();
   updateSettingsLabels();
+  updateLearningBar();
   showWelcome();
-  if (!state.apiKey) {
-    setTimeout(() => openSettings(), 400);
-  }
+  if (!state.apiKey) setTimeout(() => openSettings(), 400);
   if ("serviceWorker" in navigator) {
     try {
       await navigator.serviceWorker.register("./sw.js");
@@ -71,18 +96,14 @@ async function init() {
   }
 }
 
-/** Keep ChatGPT-like fixed shell when mobile keyboard opens */
 function setupMobileViewport() {
   const app = document.getElementById("app");
   if (!app) return;
-
   const apply = () => {
     try {
       if (window.visualViewport) {
         const vv = window.visualViewport;
-        // Height of visible area (excludes keyboard)
-        const h = Math.round(vv.height);
-        app.style.height = h + "px";
+        app.style.height = Math.round(vv.height) + "px";
         app.style.top = Math.round(vv.offsetTop) + "px";
       } else {
         app.style.height = window.innerHeight + "px";
@@ -91,7 +112,6 @@ function setupMobileViewport() {
     } catch (_) {}
     scrollChat();
   };
-
   apply();
   window.addEventListener("resize", apply);
   window.visualViewport?.addEventListener("resize", apply);
@@ -132,8 +152,7 @@ function bindUi() {
   document.getElementById("btnConfirmNo").addEventListener("click", () => finishConfirm(false));
 
   fileInput.addEventListener("change", () => {
-    const files = [...fileInput.files];
-    state.pendingFiles.push(...files);
+    state.pendingFiles.push(...fileInput.files);
     fileInput.value = "";
     renderAttachPreview();
   });
@@ -146,13 +165,10 @@ function bindUi() {
   });
   msgInput.addEventListener("input", () => {
     msgInput.style.height = "auto";
-    msgInput.style.height = Math.min(msgInput.scrollHeight, 140) + "px";
+    msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + "px";
   });
-
-  // Paste images
   msgInput.addEventListener("paste", (e) => {
-    const items = [...(e.clipboardData?.items || [])];
-    for (const it of items) {
+    for (const it of e.clipboardData?.items || []) {
       if (it.type.startsWith("image/")) {
         const f = it.getAsFile();
         if (f) {
@@ -164,20 +180,65 @@ function bindUi() {
   });
 }
 
+// ---------- Learning progress ----------
+function saveStats() {
+  try {
+    localStorage.setItem(STORAGE.stats, JSON.stringify(state.stats));
+  } catch (_) {}
+  updateLearningBar();
+  updateSettingsLabels();
+}
+
+function bumpStat(key, n = 1) {
+  state.stats[key] = (state.stats[key] || 0) + n;
+  saveStats();
+}
+
+function learningPercent() {
+  // Rough progress: rules learned toward "strong" (cap 200 for 100%)
+  const rules = state.rules.length;
+  const orders = state.stats.orders_processed || 0;
+  const score = Math.min(100, Math.round(rules * 0.45 + Math.min(orders, 80) * 0.4 + Math.min(state.stats.cells_fixed || 0, 40) * 0.2));
+  return Math.max(score, rules > 0 || orders > 0 ? 3 : 0);
+}
+
+function updateLearningBar() {
+  let bar = document.getElementById("learningBar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "learningBar";
+    bar.className = "learning-bar";
+    const top = document.querySelector(".topbar");
+    if (top && top.parentNode) top.insertAdjacentElement("afterend", bar);
+  }
+  const pct = learningPercent();
+  const g = state.stats.last_order_green || 0;
+  const t = state.stats.last_order_total || 0;
+  const last = t ? Math.round((g / t) * 100) : 0;
+  bar.innerHTML = `
+    <div class="learning-meta">
+      <span>🧠 Learning <b>${pct}%</b></span>
+      <span>Rules <b>${state.rules.length}</b></span>
+      <span>Orders <b>${state.stats.orders_processed || 0}</b></span>
+      ${t ? `<span>Last match <b>${last}%</b></span>` : ""}
+    </div>
+    <div class="learning-track"><i style="width:${pct}%"></i></div>`;
+}
+
+// ---------- Welcome / new order ----------
 function showWelcome() {
   chatEl.innerHTML = `
     <div class="welcome">
       <h2>Mohan Order Creater</h2>
-      <p>PDF, Excel, photo ya text bhejo.<br/>
-      Output hamesha: <b>Code | Qty | PO Name</b><br/>
-      Cell edit ya chat se change → Confirm pe rule save.</p>
-      <p>Master: <b>${state.master.length}</b> products · Rules: <b>${state.rules.length}</b></p>
-      ${!state.apiKey ? "<p style='color:#fbbf24'>⚠ Pehle Settings me Gemini API key daalo.</p>" : ""}
+      <p>PDF / Excel / photo / text bhejo.<br/>
+      Output: <b>Code | Qty | PO Name</b></p>
+      <p>Master <b>${state.master.length}</b> · Rules <b>${state.rules.length}</b> · Learning <b>${learningPercent()}%</b></p>
+      <p class="tips">Bol sakte ho: <i>“Benadon master me check kar”</i>, <i>“sirf ek hi hai”</i>, <i>“code 400016004”</i></p>
+      ${!state.apiKey ? "<p style='color:#fbbf24'>⚠ Settings me Gemini API key daalo.</p>" : ""}
     </div>`;
 }
 
 function newOrder() {
-  // lock previous active tables
   document.querySelectorAll(".table-card.active").forEach((el) => {
     el.classList.remove("active");
     el.classList.add("locked");
@@ -191,13 +252,20 @@ function newOrder() {
   state.pendingFiles = [];
   renderAttachPreview();
   chatEl.innerHTML = "";
-  addBotText("New order ready. PDF / Excel / image / text bhejo.");
+  addBotText("New order ready. PO bhejo — main master + rules se code bharunga.");
 }
 
-// ---------- Settings / storage ----------
+// ---------- Settings ----------
 function openSettings() {
   document.getElementById("apiKeyInput").value = state.apiKey;
-  document.getElementById("modelSelect").value = state.model;
+  const sel = document.getElementById("modelSelect");
+  if (sel && ![...sel.options].some((o) => o.value === state.model)) {
+    const opt = document.createElement("option");
+    opt.value = state.model;
+    opt.textContent = state.model;
+    sel.appendChild(opt);
+  }
+  if (sel) sel.value = state.model;
   updateSettingsLabels();
   settingsModal.classList.remove("hidden");
 }
@@ -209,39 +277,26 @@ function saveSettings() {
   state.model = resolveModel(document.getElementById("modelSelect").value);
   localStorage.setItem(STORAGE.apiKey, state.apiKey);
   localStorage.setItem(STORAGE.model, state.model);
-  const sel = document.getElementById("modelSelect");
-  if (sel && ![...sel.options].some((o) => o.value === state.model)) {
-    const opt = document.createElement("option");
-    opt.value = state.model;
-    opt.textContent = state.model;
-    sel.appendChild(opt);
-  }
-  if (sel) sel.value = state.model;
   updateSettingsLabels();
   closeSettings();
-  addBotText(state.apiKey ? "API key saved on this device only. Model: " + state.model : "API key cleared.");
+  addBotText(state.apiKey ? "Saved. Model: " + state.model : "API key cleared.");
 }
 function updateSettingsLabels() {
   const ms = document.getElementById("masterStatus");
   if (ms) ms.textContent = `${state.master.length} products loaded`;
   const rs = document.getElementById("rulesStatus");
-  if (rs) rs.textContent = `${state.rules.length} rules saved`;
-}
-
-function loadRules() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE.rules) || "[]");
-  } catch {
-    return [];
-  }
+  if (rs) rs.textContent = `${state.rules.length} rules · learning ${learningPercent()}%`;
 }
 function saveRules() {
   localStorage.setItem(STORAGE.rules, JSON.stringify(state.rules));
   updateSettingsLabels();
+  updateLearningBar();
 }
-
 function exportRules() {
-  const blob = new Blob([JSON.stringify(state.rules, null, 2)], { type: "application/json" });
+  const blob = new Blob(
+    [JSON.stringify({ rules: state.rules, stats: state.stats }, null, 2)],
+    { type: "application/json" }
+  );
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `mohan-rules-${new Date().toISOString().slice(0, 10)}.json`;
@@ -251,25 +306,26 @@ async function importRules(e) {
   const f = e.target.files?.[0];
   if (!f) return;
   try {
-    const text = await f.text();
-    const data = JSON.parse(text);
-    if (!Array.isArray(data)) throw new Error("Invalid rules file");
-    state.rules = data;
+    const data = JSON.parse(await f.text());
+    const rules = Array.isArray(data) ? data : data.rules;
+    if (!Array.isArray(rules)) throw new Error("Invalid file");
+    state.rules = rules;
+    if (data.stats) state.stats = { ...state.stats, ...data.stats };
     saveRules();
-    addBotText(`Imported ${data.length} rules.`);
+    saveStats();
+    addBotText(`Imported ${rules.length} rules.`);
   } catch (err) {
     alert("Import failed: " + err.message);
   }
   e.target.value = "";
 }
 function clearRules() {
-  if (!confirm("Clear ALL saved rules on this device?")) return;
+  if (!confirm("Clear ALL rules?")) return;
   state.rules = [];
   saveRules();
 }
 
 async function loadMaster() {
-  // try localStorage cache first
   try {
     const cached = localStorage.getItem(STORAGE.master);
     if (cached) {
@@ -286,6 +342,16 @@ async function loadMaster() {
   } catch (_) {}
 }
 
+function rebuildBrandIndex() {
+  state.brandIndex = new Map();
+  for (const p of state.master) {
+    const b = brandToken(p.name);
+    if (!b) continue;
+    if (!state.brandIndex.has(b)) state.brandIndex.set(b, []);
+    state.brandIndex.get(b).push(p);
+  }
+}
+
 async function onMasterUpload(e) {
   const f = e.target.files?.[0];
   if (!f) return;
@@ -294,8 +360,9 @@ async function onMasterUpload(e) {
     if (!products.length) throw new Error("No products found");
     state.master = products;
     localStorage.setItem(STORAGE.master, JSON.stringify(products));
+    rebuildBrandIndex();
     updateSettingsLabels();
-    addBotText(`Master updated: ${products.length} products from ${f.name}`);
+    addBotText(`Master updated: ${products.length} products.`);
   } catch (err) {
     alert("Master upload failed: " + err.message);
   }
@@ -331,16 +398,15 @@ async function parseMasterFile(file) {
   return out;
 }
 
-// ---------- Chat UI helpers ----------
+// ---------- Chat UI ----------
 function addUserBubble(text, files = []) {
   const wrap = document.createElement("div");
   wrap.className = "msg user";
-  const names = files.map((f) => f.name || "file").join(", ");
   wrap.innerHTML = `<div class="meta">You</div><div class="bubble"></div>`;
-  const bubble = wrap.querySelector(".bubble");
+  const names = files.map((f) => f.name || "file").join(", ");
   let t = text || "";
   if (names) t = (t ? t + "\n" : "") + "📎 " + names;
-  bubble.textContent = t || "(attachment)";
+  wrap.querySelector(".bubble").textContent = t || "(attachment)";
   chatEl.appendChild(wrap);
   scrollChat();
 }
@@ -359,7 +425,7 @@ function addTyping() {
   const wrap = document.createElement("div");
   wrap.className = "msg bot";
   wrap.id = "typingMsg";
-  wrap.innerHTML = `<div class="meta">Mohan OC</div><div class="bubble"><span class="typing"><i></i><i></i><i></i></span></div>`;
+  wrap.innerHTML = `<div class="meta">Mohan OC</div><div class="bubble"><span class="typing"><i></i><i></i><i></i></span> soch raha hoon…</div>`;
   chatEl.appendChild(wrap);
   scrollChat();
   return wrap;
@@ -367,13 +433,11 @@ function addTyping() {
 function removeTyping() {
   document.getElementById("typingMsg")?.remove();
 }
-
 function scrollChat() {
   requestAnimationFrame(() => {
     chatEl.scrollTop = chatEl.scrollHeight;
   });
 }
-
 function renderAttachPreview() {
   if (!state.pendingFiles.length) {
     attachPreview.classList.add("hidden");
@@ -384,24 +448,22 @@ function renderAttachPreview() {
   attachPreview.innerHTML = state.pendingFiles
     .map(
       (f, i) =>
-        `<span class="chip">${escapeHtml(f.name || "file")} <button type="button" data-i="${i}" aria-label="remove">✕</button></span>`
+        `<span class="chip">${escapeHtml(f.name || "file")} <button type="button" data-i="${i}">✕</button></span>`
     )
     .join("");
   attachPreview.querySelectorAll("button").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.onclick = () => {
       state.pendingFiles.splice(+btn.dataset.i, 1);
       renderAttachPreview();
-    });
+    };
   });
 }
 
-// ---------- Send / process ----------
+// ---------- Send ----------
 async function onSend() {
   const text = msgInput.value.trim();
   const files = [...state.pendingFiles];
   if (!text && !files.length) return;
-
-  // welcome clear
   if (chatEl.querySelector(".welcome")) chatEl.innerHTML = "";
 
   addUserBubble(text, files);
@@ -411,25 +473,21 @@ async function onSend() {
   renderAttachPreview();
 
   if (!state.apiKey) {
-    addBotText("Gemini API key missing. Settings ⚙ me key daalo (aistudio.google.com).");
+    addBotText("Gemini API key missing. ⚙ Settings me daalo.");
     openSettings();
     return;
   }
 
   btnSend.disabled = true;
-  const typing = addTyping();
-
+  addTyping();
   try {
-    const hasOrderMaterial =
-      files.length > 0 || looksLikeOrderText(text) || !state.activeOrderId;
-
     if (files.length || looksLikeOrderText(text)) {
       await processOrder({ text, files });
     } else if (state.activeOrderId && text) {
       await processChatEdit(text);
     } else if (text) {
-      // general / first message without clear order — still try parse
-      await processOrder({ text, files: [] });
+      // no active order — still try master Q&A
+      await processChatEdit(text);
     } else {
       addBotText("Kuch text ya file bhejo.");
     }
@@ -445,23 +503,27 @@ async function onSend() {
 
 function looksLikeOrderText(t) {
   if (!t || t.length < 8) return false;
-  // short instruction-like messages
-  if (t.length < 80 && /^(change|update|set|rule|yaad|save|code|qty|quantity|party|fix|mat|do|please)/i.test(t)) {
+  if (
+    t.length < 100 &&
+    /^(change|update|set|rule|yaad|save|code|qty|quantity|party|fix|check|master|file|benadon|alaspan|sirf|ek hi|only one|map|correct|sahi|galat|mat|do|please|dekh|dhoond|search)/i.test(
+      t
+    )
+  ) {
     return false;
   }
-  if (/\b(qty|quantity|tabs?|cream|syrup|lotion|soap|ml|gm|mg|strip|bottle|order|po\b)/i.test(t)) return true;
+  if (/\b(qty|quantity|tabs?|cream|syrup|lotion|soap|ml|gm|mg|strip|bottle|order|po\b|purchase)/i.test(t))
+    return true;
   if (t.split("\n").length >= 3) return true;
   return t.length > 120;
 }
 
+// ---------- Order process ----------
 async function processOrder({ text, files }) {
-  const extractedParts = [];
+  const parts = [];
   for (const f of files) {
-    const part = await fileToModelPart(f);
-    if (part) extractedParts.push(part);
+    const p = await fileToModelPart(f);
+    if (p) parts.push(p);
   }
-
-  // Also extract plain text from excel/pdf locally as backup context
   let localText = text || "";
   for (const f of files) {
     try {
@@ -470,33 +532,37 @@ async function processOrder({ text, files }) {
     } catch (_) {}
   }
 
-  const parsed = await geminiParseOrder({
-    userText: text,
-    localText,
-    parts: extractedParts,
-  });
-
-  const rows = (parsed.items || []).map((it) => {
-    const poName = String(it.po_name || it.name || "").trim();
-    const pack = String(it.pack || "").trim();
-    const qty = normalizeQty(it.qty);
-    const party = String(it.party || parsed.party || "").trim();
-    const match = matchProduct({ poName, pack, party });
-    return {
-      code: match.code || "",
-      qty,
-      po_name: poName,
-      pack,
-      party,
-      status: match.status, // green | yellow | red
-      master_name: match.master_name || "",
-      confidence: match.confidence || 0,
-      note: match.note || "",
-    };
-  });
-
-  // apply qty rules
+  const parsed = await geminiParseOrder({ userText: text, localText, parts });
+  const rows = (parsed.items || []).map((it) => rowFromItem(it, parsed.party));
   for (const r of rows) applyQtyRules(r);
+
+  // Auto-learn high-confidence matches as soft rules? No — only green with high score optional
+  // Auto-save green alias when very strong unique brand match
+  let autoLearned = 0;
+  for (const r of rows) {
+    if (r.status === "green" && r.code && r.confidence >= 0.85 && r.po_name) {
+      const existed = state.rules.some(
+        (x) => norm(x.pattern) === norm(r.po_name) && norm(x.pack || "") === norm(r.pack || "")
+      );
+      if (!existed) {
+        upsertRule(
+          {
+            pattern: r.po_name,
+            pack: r.pack,
+            party: "",
+            code: r.code,
+            note: "auto from strong match",
+          },
+          { silent: true }
+        );
+        autoLearned++;
+      }
+    }
+  }
+  if (autoLearned) {
+    state.stats.rules_learned = (state.stats.rules_learned || 0) + autoLearned;
+    saveStats();
+  }
 
   const orderId = "ord_" + Date.now();
   state.activeOrderId = orderId;
@@ -510,85 +576,448 @@ async function processOrder({ text, files }) {
     },
   });
 
+  const g = rows.filter((r) => r.status === "green").length;
+  const y = rows.filter((r) => r.status === "yellow").length;
+  const rd = rows.filter((r) => r.status === "red").length;
+  state.stats.orders_processed = (state.stats.orders_processed || 0) + 1;
+  state.stats.last_order_green = g;
+  state.stats.last_order_total = rows.length;
+  saveStats();
+
   removeTyping();
   renderOrderTable(orderId);
 
-  const g = rows.filter((r) => r.status === "green").length;
-  const y = rows.filter((r) => r.status === "yellow").length;
-  const r = rows.filter((r) => r.status === "red").length;
+  const weak = rows
+    .filter((r) => r.status !== "green")
+    .slice(0, 6)
+    .map((r, i) => `• ${r.po_name}${r.master_name ? " → ? " + r.master_name.split("|")[0].trim() : ""}`)
+    .join("\n");
+
   addBotText(
-    `Parsed ${rows.length} lines. 🟢 ${g} sure · 🟡 ${y} check · 🔴 ${r} no code.\n` +
+    `Parsed ${rows.length} lines. 🟢 ${g} sure · 🟡 ${y} check · 🔴 ${rd} no code.\n` +
       (parsed.party ? `Party: ${parsed.party}\n` : "") +
-      `Output order: Code → Qty → PO Name. Cell edit or type a change.`
+      (autoLearned ? `Auto-learned ${autoLearned} strong alias rule(s).\n` : "") +
+      `Learning now: ${learningPercent()}% · Rules: ${state.rules.length}\n` +
+      (weak ? `\nCheck these:\n${weak}\n\nBol: “Benadon master me check kar” ya cell me code likho.` : "\nSab green — Copy Excel ready.")
   );
 }
 
+function rowFromItem(it, partyFallback) {
+  const poName = String(it.po_name || it.name || "").trim();
+  const pack = String(it.pack || "").trim();
+  const qty = normalizeQty(it.qty);
+  const party = String(it.party || partyFallback || "").trim();
+  const match = matchProduct({ poName, pack, party });
+  return {
+    code: match.code || "",
+    qty,
+    po_name: poName,
+    pack,
+    party,
+    status: match.status,
+    master_name: match.master_name || "",
+    confidence: match.confidence || 0,
+    note: match.note || "",
+    candidates: match.candidates || [],
+  };
+}
+
+// ---------- Smart chat ----------
 async function processChatEdit(text) {
-  const order = state.orders.get(state.activeOrderId);
-  if (!order) {
-    addBotText("Koi active order nahi. Pehle PO bhejo.");
+  const order = state.activeOrderId ? state.orders.get(state.activeOrderId) : null;
+
+  // 1) Fast local intents (no API) — feels instant & smart
+  const local = handleLocalIntent(text, order);
+  if (local) {
+    removeTyping();
+    if (local.message) addBotText(local.message);
+    if (local.rerender && state.activeOrderId) {
+      document.querySelector(`.table-card[data-oid="${state.activeOrderId}"]`)?.remove();
+      renderOrderTable(state.activeOrderId);
+    }
     return;
   }
+
+  if (!order) {
+    // Master-only Q&A via tools
+    const hits = searchMaster(text, 8);
+    removeTyping();
+    if (hits.length) {
+      bumpStat("master_lookups");
+      addBotText(
+        "Master me mila:\n" +
+          hits.map((h) => `• ${h.code} — ${h.name}`).join("\n") +
+          "\n\nOrder bhejo to table me map kar dunga."
+      );
+    } else {
+      addBotText("Pehle PO bhejo, ya product ka naam clearly likho (jaise BENADON).");
+    }
+    return;
+  }
+
+  // 2) Build master candidates for weak rows for the model
+  const weakRows = order.rows
+    .map((r, i) => ({ i, r }))
+    .filter(({ r }) => r.status !== "green" || !r.code);
+
+  const toolContext = weakRows.slice(0, 12).map(({ i, r }) => {
+    const cands = rankMasterCandidates(r.po_name, r.pack, 5).map((c) => ({
+      code: c.p.code,
+      name: c.p.name,
+      score: +c.score.toFixed(2),
+    }));
+    return { row: i, po_name: r.po_name, pack: r.pack, qty: r.qty, current_code: r.code, candidates: cands };
+  });
 
   const draft = await geminiInterpretEdit({
     message: text,
     rows: order.rows,
     meta: order.meta,
+    toolContext,
+    masterSize: state.master.length,
   });
 
   removeTyping();
 
+  // If model returned search-only answer
   if (draft.type === "chat" || draft.type === "info") {
+    // If user asked master check but model only talked — force local master resolve
+    if (/master|check|file|dhoond|search|dekh|code/i.test(text)) {
+      const forced = autoResolveFromMaster(order, text);
+      if (forced.updated) {
+        document.querySelector(`.table-card[data-oid="${state.activeOrderId}"]`)?.remove();
+        renderOrderTable(state.activeOrderId);
+        addBotText(forced.message);
+        return;
+      }
+    }
     addBotText(draft.message || "OK");
     return;
   }
 
-  // Propose rule + row updates
+  // Apply updates (with confirm only if rules change OR multi-row)
+  const rules = draft.rules || (draft.rule ? [draft.rule] : []);
+  const updates = draft.row_updates || [];
   const summary = formatDraftSummary(draft);
-  addBotText("Samajh gaya:\n" + summary);
 
-  const ok = await askConfirm(summary + "\n\nSave rule / apply changes?");
-  if (!ok) {
-    addBotText("Cancel — kuch save nahi hua.");
-    return;
+  let apply = true;
+  if (rules.length || updates.length > 3) {
+    addBotText("Samajh gaya:\n" + summary);
+    apply = await askConfirm(summary + "\n\nApply + save rules?");
+    if (!apply) {
+      addBotText("Cancel — kuch change nahi hua.");
+      return;
+    }
+  } else if (updates.length) {
+    addBotText(draft.message || summary || "Update laga raha hoon…");
   }
 
-  // Apply row patches
-  if (Array.isArray(draft.row_updates)) {
-    for (const u of draft.row_updates) {
-      const idx = findRowIndex(order.rows, u);
-      if (idx < 0) continue;
-      const row = order.rows[idx];
-      if (u.code != null && String(u.code).trim() !== "") {
-        row.code = String(u.code).trim();
-        row.status = "green";
-        row.note = "updated by chat";
+  let changed = 0;
+  for (const u of updates) {
+    const idx = findRowIndex(order.rows, u);
+    if (idx < 0) continue;
+    const row = order.rows[idx];
+    if (u.code != null && String(u.code).trim() !== "") {
+      row.code = String(u.code).trim();
+      row.status = "green";
+      row.note = "chat/master";
+      row.master_name = u.master_name || row.master_name;
+      changed++;
+      // auto rule
+      upsertRule(
+        {
+          pattern: row.po_name,
+          pack: row.pack,
+          party: row.party || order.meta?.party || "",
+          code: row.code,
+          note: "from chat",
+        },
+        { silent: true }
+      );
+      bumpStat("rules_learned");
+      bumpStat("cells_fixed");
+    }
+    if (u.qty != null && u.qty !== "") row.qty = normalizeQty(u.qty);
+    if (u.po_name) row.po_name = String(u.po_name);
+    if (u.pack) row.pack = String(u.pack);
+  }
+  for (const rule of rules) {
+    upsertRule(rule, { silent: true });
+    bumpStat("rules_learned");
+  }
+
+  // recount
+  const g = order.rows.filter((r) => r.status === "green").length;
+  state.stats.last_order_green = g;
+  state.stats.last_order_total = order.rows.length;
+  saveStats();
+
+  document.querySelector(`.table-card[data-oid="${state.activeOrderId}"]`)?.remove();
+  renderOrderTable(state.activeOrderId);
+  addBotText(
+    (draft.message ? draft.message + "\n" : "") +
+      `Updated ${changed} row(s). 🟢 ${g}/${order.rows.length}. Rules: ${state.rules.length}. Learning: ${learningPercent()}%`
+  );
+}
+
+/** Local intents without waiting for Gemini */
+function handleLocalIntent(text, order) {
+  const t = text.trim();
+  const lower = t.toLowerCase();
+
+  // Progress
+  if (/^(progress|learning|status|kitna|stats)/i.test(t)) {
+    return {
+      message: `Learning ${learningPercent()}%\nRules: ${state.rules.length}\nOrders: ${state.stats.orders_processed}\nFixes: ${state.stats.cells_fixed}\nMaster: ${state.master.length} products`,
+    };
+  }
+
+  // Rematch all
+  if (order && /(re.?match|dobara match|phir se match|refresh match|auto match)/i.test(t)) {
+    for (const r of order.rows) {
+      const m = matchProduct({ poName: r.po_name, pack: r.pack, party: r.party });
+      r.code = m.code || r.code;
+      r.status = m.status;
+      r.master_name = m.master_name;
+      r.confidence = m.confidence;
+      r.note = m.note;
+      r.candidates = m.candidates;
+    }
+    const g = order.rows.filter((x) => x.status === "green").length;
+    state.stats.last_order_green = g;
+    state.stats.last_order_total = order.rows.length;
+    saveStats();
+    return {
+      rerender: true,
+      message: `Rematch done. 🟢 ${g}/${order.rows.length}. Learning ${learningPercent()}%`,
+    };
+  }
+
+  // Explicit code assignment: "benadon 400016004" or "row 3 code 400016004"
+  const codeAssign = t.match(/(?:row\s*)?(\d+)?\s*[:\-]?\s*(.+?)?\s*(?:code\s*)?(?:=|\bis\b|:)?\s*(\d{6,12})\s*$/i);
+  if (order && codeAssign && codeAssign[3]) {
+    const code = codeAssign[3];
+    const rowHint = codeAssign[1] ? Number(codeAssign[1]) - 1 : null;
+    const nameHint = (codeAssign[2] || "").replace(/code/gi, "").trim();
+    let idx = -1;
+    if (rowHint != null && !Number.isNaN(rowHint) && order.rows[rowHint]) idx = rowHint;
+    else if (nameHint) idx = findRowIndex(order.rows, { po_name: nameHint });
+    else {
+      // if only one red/yellow matches last mentioned brand in message
+      const brand = brandToken(nameHint || t);
+      if (brand) {
+        idx = order.rows.findIndex((r) => norm(r.po_name).includes(brand) && r.status !== "green");
+        if (idx < 0) idx = order.rows.findIndex((r) => norm(r.po_name).includes(brand));
       }
-      if (u.qty != null && u.qty !== "") row.qty = normalizeQty(u.qty);
-      if (u.po_name) row.po_name = String(u.po_name);
-      if (u.pack) row.pack = String(u.pack);
+    }
+    if (idx >= 0) {
+      const row = order.rows[idx];
+      row.code = code;
+      row.status = "green";
+      row.note = "manual code";
+      const m = state.master.find((p) => String(p.code) === code);
+      if (m) row.master_name = m.name;
+      upsertRule({ pattern: row.po_name, pack: row.pack, code, note: "user code" }, { silent: true });
+      bumpStat("rules_learned");
+      bumpStat("cells_fixed");
+      return {
+        rerender: true,
+        message: `✅ ${row.po_name} → ${code}${m ? " (" + m.name + ")" : ""}\nRule saved. Learning ${learningPercent()}%`,
+      };
     }
   }
 
-  // Upsert rules
-  if (Array.isArray(draft.rules)) {
-    for (const rule of draft.rules) upsertRule(rule);
-  } else if (draft.rule) {
-    upsertRule(draft.rule);
+  // "only one / ek hi hai" + product name → pick unique master brand hit
+  if (order && /(ek hi|only one|sirf ek|single|unique|ek hi hai)/i.test(t)) {
+    const res = autoResolveFromMaster(order, t, { uniqueOnly: true });
+    if (res.updated) return { rerender: true, message: res.message };
   }
 
-  // Re-render
-  document.querySelector(`.table-card[data-oid="${state.activeOrderId}"]`)?.remove();
-  renderOrderTable(state.activeOrderId);
-  addBotText("Applied. Rules: " + state.rules.length);
+  // master check / file me dekh / dhoond
+  if (order && /(master|file me|check kar|dhoond|search|dekh|map kar|fill|auto)/i.test(t)) {
+    const res = autoResolveFromMaster(order, t, { uniqueOnly: false });
+    if (res.updated) return { rerender: true, message: res.message };
+    // show candidates
+    const focus = extractFocusName(t, order);
+    if (focus) {
+      const cands = rankMasterCandidates(focus, "", 6);
+      bumpStat("master_lookups");
+      if (cands.length) {
+        return {
+          message:
+            `"${focus}" master options:\n` +
+            cands.map((c, i) => `${i + 1}. ${c.p.code} — ${c.p.name} (${c.score.toFixed(2)})`).join("\n") +
+            `\n\nLikho: "${focus} ${cands[0].p.code}" ya serial number se choose.`,
+        };
+      }
+      return { message: `"${focus}" master me nahi mila. Naam thoda aur clear likho.` };
+    }
+  }
+
+  // choose option number "1" when last weak row?
+  if (order && /^\s*[1-6]\s*$/.test(t)) {
+    const n = Number(t.trim()) - 1;
+    const weak = order.rows.find((r) => r.status !== "green" && r.candidates?.length);
+    if (weak && weak.candidates[n]) {
+      const c = weak.candidates[n];
+      weak.code = c.code;
+      weak.status = "green";
+      weak.master_name = c.name;
+      weak.note = "picked option";
+      upsertRule({ pattern: weak.po_name, pack: weak.pack, code: c.code, note: "option pick" }, { silent: true });
+      bumpStat("rules_learned");
+      bumpStat("cells_fixed");
+      return {
+        rerender: true,
+        message: `✅ ${weak.po_name} → ${c.code} (${c.name})\nRule saved. Learning ${learningPercent()}%`,
+      };
+    }
+  }
+
+  return null;
+}
+
+function extractFocusName(text, order) {
+  // remove command words
+  let s = text
+    .replace(/(master|file|me|check|kar|karke|dhoond|search|dekh|lo|do|please|pls|code|auto|map|fill|ek hi|hai|only|one|sirf|unique|product|item|row)/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (s.length >= 3) return s;
+  // fallback: first non-green row
+  if (order) {
+    const w = order.rows.find((r) => r.status !== "green");
+    if (w) return w.po_name;
+  }
+  return "";
+}
+
+function autoResolveFromMaster(order, text, { uniqueOnly = false } = {}) {
+  const focus = extractFocusName(text, order);
+  const targets = [];
+  if (focus) {
+    for (let i = 0; i < order.rows.length; i++) {
+      const r = order.rows[i];
+      if (norm(r.po_name).includes(norm(focus)) || norm(focus).includes(brandToken(r.po_name))) {
+        targets.push(i);
+      }
+    }
+  }
+  if (!targets.length) {
+    // all weak rows
+    order.rows.forEach((r, i) => {
+      if (r.status !== "green" || !r.code) targets.push(i);
+    });
+  }
+  if (!targets.length && focus) {
+    // still try brand across all
+    order.rows.forEach((r, i) => {
+      if (brandToken(r.po_name) && brandToken(focus) === brandToken(r.po_name)) targets.push(i);
+    });
+  }
+
+  let updated = 0;
+  const lines = [];
+  bumpStat("master_lookups");
+
+  for (const i of [...new Set(targets)]) {
+    const row = order.rows[i];
+    const cands = rankMasterCandidates(row.po_name || focus, row.pack, 6);
+    row.candidates = cands.map((c) => ({ code: c.p.code, name: c.p.name, score: c.score }));
+    if (!cands.length) {
+      lines.push(`• ${row.po_name}: master me nahi mila`);
+      continue;
+    }
+    const top = cands[0];
+    const second = cands[1];
+    const uniqueBrand = isUniqueBrandMatch(row.po_name, cands);
+    const clear =
+      top.score >= 0.72 ||
+      uniqueBrand ||
+      (top.score >= 0.55 && (!second || top.score - second.score >= 0.12));
+
+    if (uniqueOnly && !uniqueBrand && cands.length > 1 && top.score < 0.9) {
+      lines.push(
+        `• ${row.po_name}: ${cands.length} options — ` +
+          cands
+            .slice(0, 3)
+            .map((c) => c.p.code)
+            .join(", ")
+      );
+      continue;
+    }
+
+    if (clear || uniqueOnly && uniqueBrand) {
+      row.code = top.p.code;
+      row.status = "green";
+      row.master_name = top.p.name;
+      row.confidence = top.score;
+      row.note = uniqueBrand ? "unique brand in master" : "master check";
+      upsertRule(
+        { pattern: row.po_name, pack: row.pack, code: top.p.code, note: "master resolve" },
+        { silent: true }
+      );
+      updated++;
+      bumpStat("rules_learned");
+      bumpStat("cells_fixed");
+      lines.push(`✅ ${row.po_name} → ${top.p.code} (${top.p.name})`);
+    } else {
+      row.code = top.p.code;
+      row.status = "yellow";
+      row.master_name = cands
+        .slice(0, 3)
+        .map((c) => c.p.name)
+        .join(" | ");
+      row.note = "verify options";
+      lines.push(
+        `🟡 ${row.po_name} → ${top.p.code}? options:\n` +
+          cands
+            .slice(0, 4)
+            .map((c, idx) => `   ${idx + 1}. ${c.p.code} — ${c.p.name}`)
+            .join("\n")
+      );
+    }
+  }
+
+  const g = order.rows.filter((r) => r.status === "green").length;
+  state.stats.last_order_green = g;
+  state.stats.last_order_total = order.rows.length;
+  saveStats();
+
+  return {
+    updated: updated > 0 || lines.length > 0,
+    message:
+      (updated ? `Master se ${updated} code map kiye.\n` : "Master check:\n") +
+      lines.join("\n") +
+      `\n\n🟢 ${g}/${order.rows.length} · Rules ${state.rules.length} · Learning ${learningPercent()}%`,
+  };
+}
+
+function isUniqueBrandMatch(poName, cands) {
+  const b = brandToken(poName);
+  if (!b || !cands.length) return false;
+  const same = state.master.filter((p) => brandToken(p.name) === b);
+  // unique product under brand in master
+  if (same.length === 1 && brandToken(cands[0].p.name) === b) return true;
+  // all top candidates same code
+  if (cands.length >= 1 && cands.every((c) => c.p.code === cands[0].p.code)) return true;
+  // only one master row contains brand
+  return same.length === 1;
 }
 
 function findRowIndex(rows, u) {
   if (typeof u.row === "number" && u.row >= 0 && u.row < rows.length) return u.row;
   if (u.po_name) {
     const n = norm(u.po_name);
-    const i = rows.findIndex((r) => norm(r.po_name).includes(n) || n.includes(norm(r.po_name)));
+    let i = rows.findIndex((r) => norm(r.po_name) === n);
     if (i >= 0) return i;
+    i = rows.findIndex((r) => norm(r.po_name).includes(n) || n.includes(norm(r.po_name)));
+    if (i >= 0) return i;
+    const b = brandToken(u.po_name);
+    if (b) {
+      i = rows.findIndex((r) => brandToken(r.po_name) === b);
+      if (i >= 0) return i;
+    }
   }
   if (u.code) {
     const i = rows.findIndex((r) => String(r.code) === String(u.code));
@@ -603,26 +1032,20 @@ function formatDraftSummary(draft) {
   if (draft.row_updates?.length) {
     lines.push("Row changes:");
     for (const u of draft.row_updates) {
-      lines.push(
-        `  • row ${u.row ?? "?"} ${u.po_name || ""} → code=${u.code ?? "—"} qty=${u.qty ?? "—"}`
-      );
+      lines.push(`  • row ${u.row ?? "?"} ${u.po_name || ""} → ${u.code ?? "—"} qty=${u.qty ?? "—"}`);
     }
   }
   const rules = draft.rules || (draft.rule ? [draft.rule] : []);
   if (rules.length) {
-    lines.push("Rules to save:");
+    lines.push("Rules:");
     for (const r of rules) {
-      lines.push(
-        `  • [${r.party || "*"}] ${r.pattern || r.po_name || ""} ${r.pack || ""} → ${r.code || ""} ${
-          r.qty_multiple ? "×" + r.qty_multiple : ""
-        }`
-      );
+      lines.push(`  • ${r.pattern || ""} ${r.pack || ""} → ${r.code || ""}`);
     }
   }
-  return lines.join("\n") || JSON.stringify(draft, null, 2);
+  return lines.join("\n") || "updates";
 }
 
-function upsertRule(rule) {
+function upsertRule(rule, { silent = false } = {}) {
   if (!rule) return;
   const pattern = String(rule.pattern || rule.po_name || "").trim();
   if (!pattern && !rule.code) return;
@@ -632,22 +1055,30 @@ function upsertRule(rule) {
     norm(r.pattern) === norm(pattern) &&
     norm(r.party || "") === norm(party) &&
     norm(r.pack || "") === norm(pack);
-
   const idx = state.rules.findIndex(keyMatch);
   const row = {
-    id: idx >= 0 ? state.rules[idx].id : "r_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    id: idx >= 0 ? state.rules[idx].id : "r_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
     pattern,
     party,
     pack,
     pack_exclude: String(rule.pack_exclude || "").trim(),
     code: rule.code != null ? String(rule.code).trim() : idx >= 0 ? state.rules[idx].code : "",
-    qty_multiple: rule.qty_multiple != null ? Number(rule.qty_multiple) || null : idx >= 0 ? state.rules[idx].qty_multiple : null,
+    qty_multiple:
+      rule.qty_multiple != null
+        ? Number(rule.qty_multiple) || null
+        : idx >= 0
+          ? state.rules[idx].qty_multiple
+          : null,
     note: rule.note || "",
     updated_at: new Date().toISOString(),
   };
+  if (!row.code) return;
   if (idx >= 0) state.rules[idx] = { ...state.rules[idx], ...row };
   else state.rules.push(row);
   saveRules();
+  if (!silent) {
+    /* optional toast */
+  }
 }
 
 function askConfirm(text) {
@@ -664,12 +1095,11 @@ function finishConfirm(yes) {
   if (r) r(yes);
 }
 
-// ---------- Table render / edit / copy ----------
+// ---------- Table ----------
 function renderOrderTable(orderId) {
   const order = state.orders.get(orderId);
   if (!order) return;
 
-  // demote other actives
   document.querySelectorAll(".table-card.active").forEach((el) => {
     if (el.dataset.oid !== orderId) {
       el.classList.remove("active");
@@ -685,34 +1115,32 @@ function renderOrderTable(orderId) {
   const card = document.createElement("div");
   card.className = "table-card active msg bot";
   card.dataset.oid = orderId;
-  card.style.maxWidth = "min(100%, 760px)";
 
   const meta = order.meta || {};
+  const g = order.rows.filter((r) => r.status === "green").length;
   card.innerHTML = `
     <div class="table-toolbar">
       <span class="title">${escapeHtml(meta.party || "Order")}${
-    meta.order_no ? " · #" + escapeHtml(meta.order_no) : ""
-  }</span>
+    meta.order_no ? " · #" + escapeHtml(String(meta.order_no)) : ""
+  } · ${g}/${order.rows.length}</span>
       <span class="badge on">ACTIVE</span>
-      <button type="button" class="btn ghost btn-copy-codes" title="Copy codes column">Copy Codes</button>
-      <button type="button" class="btn ghost btn-copy-qty" title="Copy qty column">Copy Qty</button>
-      <button type="button" class="btn ghost btn-copy-names" title="Copy names">Copy Names</button>
-      <button type="button" class="btn primary btn-copy-tsv" title="Copy full table for Excel">Copy Excel</button>
+      <button type="button" class="btn ghost btn-rematch">Rematch</button>
+      <button type="button" class="btn ghost btn-copy-codes">Codes</button>
+      <button type="button" class="btn ghost btn-copy-qty">Qty</button>
+      <button type="button" class="btn ghost btn-copy-names">Names</button>
+      <button type="button" class="btn primary btn-copy-tsv">Copy Excel</button>
     </div>
     <div class="table-scroll">
       <table class="order-table">
-        <thead>
-          <tr>
-            <th class="row-status"></th>
-            <th>Code</th>
-            <th>Qty</th>
-            <th>PO Name</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th class="row-status"></th>
+          <th>Code</th>
+          <th>Qty</th>
+          <th>PO Name</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
-    </div>
-  `;
+    </div>`;
 
   const tbody = card.querySelector("tbody");
   order.rows.forEach((row, idx) => {
@@ -722,8 +1150,7 @@ function renderOrderTable(orderId) {
       <td class="row-status"><span class="st-${row.status || "red"}"></span></td>
       <td class="cell code" contenteditable="true" spellcheck="false"></td>
       <td class="cell qty" contenteditable="true" spellcheck="false"></td>
-      <td class="cell po-name" contenteditable="true" spellcheck="false"></td>
-    `;
+      <td class="cell po-name" contenteditable="true" spellcheck="false"></td>`;
     tr.querySelector(".code").textContent = row.code || "";
     tr.querySelector(".qty").textContent = row.qty ?? "";
     const nameCell = tr.querySelector(".po-name");
@@ -737,19 +1164,11 @@ function renderOrderTable(orderId) {
       nameCell.appendChild(document.createElement("br"));
       nameCell.appendChild(hint);
     }
-
-    // edit handlers
     tr.querySelectorAll(".cell").forEach((cell) => {
       cell.addEventListener("focus", () => {
-        // strip hint from name when editing
-        if (cell.classList.contains("po-name")) {
-          cell.dataset.full = row.po_name;
-          cell.textContent = row.po_name || "";
-        }
+        if (cell.classList.contains("po-name")) cell.textContent = row.po_name || "";
       });
-      cell.addEventListener("blur", async () => {
-        await onCellEdit(orderId, idx, cell);
-      });
+      cell.addEventListener("blur", () => onCellEdit(orderId, idx, cell));
       cell.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -757,7 +1176,6 @@ function renderOrderTable(orderId) {
         }
       });
     });
-
     tbody.appendChild(tr);
   });
 
@@ -770,7 +1188,27 @@ function renderOrderTable(orderId) {
   card.querySelector(".btn-copy-tsv").onclick = () => {
     const header = "Code\tQty\tPO Name";
     const body = order.rows.map((r) => `${r.code || ""}\t${r.qty ?? ""}\t${r.po_name || ""}`).join("\n");
-    copyText(header + "\n" + body, "Table copied — Excel me Ctrl+V");
+    copyText(header + "\n" + body, "Excel ke liye copy ho gaya");
+  };
+  card.querySelector(".btn-rematch").onclick = async () => {
+    for (const r of order.rows) {
+      const m = matchProduct({ poName: r.po_name, pack: r.pack, party: r.party });
+      Object.assign(r, {
+        code: m.code || "",
+        status: m.status,
+        master_name: m.master_name,
+        confidence: m.confidence,
+        note: m.note,
+        candidates: m.candidates,
+      });
+    }
+    const g2 = order.rows.filter((r) => r.status === "green").length;
+    state.stats.last_order_green = g2;
+    state.stats.last_order_total = order.rows.length;
+    saveStats();
+    card.remove();
+    renderOrderTable(orderId);
+    addBotText(`Rematch: 🟢 ${g2}/${order.rows.length}`);
   };
 
   chatEl.appendChild(card);
@@ -782,62 +1220,41 @@ async function onCellEdit(orderId, idx, cell) {
   if (!order) return;
   const row = order.rows[idx];
   if (!row) return;
-
   let raw = cell.innerText.replace(/\u00a0/g, " ").trim();
-  // if name cell had hint lines, take first line only
-  if (cell.classList.contains("po-name")) {
-    raw = raw.split("\n")[0].trim();
-  }
-
-  let changed = false;
-  let ruleDraft = null;
+  if (cell.classList.contains("po-name")) raw = raw.split("\n")[0].trim();
 
   if (cell.classList.contains("code")) {
-    const v = raw;
-    if (v !== String(row.code || "")) {
-      const old = row.code;
-      row.code = v;
-      row.status = v ? "green" : "red";
+    if (raw !== String(row.code || "")) {
+      row.code = raw;
+      row.status = raw ? "green" : "red";
       row.note = "manual edit";
-      changed = true;
-      if (v) {
-        ruleDraft = {
-          pattern: row.po_name,
-          pack: row.pack,
-          party: row.party || order.meta?.party || "",
-          code: v,
-          note: `from cell edit (was ${old || "empty"})`,
-        };
+      const m = state.master.find((p) => String(p.code) === raw);
+      if (m) row.master_name = m.name;
+      refreshRowDom(orderId, idx);
+      if (raw) {
+        const ok = await askConfirm(`Save rule?\n\n"${row.po_name}" ${row.pack || ""}\n→ ${raw}`);
+        if (ok) {
+          upsertRule({ pattern: row.po_name, pack: row.pack, party: row.party, code: raw, note: "cell" });
+          bumpStat("rules_learned");
+          bumpStat("cells_fixed");
+          addBotText(`Rule saved: ${row.po_name} → ${raw} · Learning ${learningPercent()}%`);
+        }
       }
     }
   } else if (cell.classList.contains("qty")) {
-    const v = normalizeQty(raw);
-    if (v !== row.qty) {
-      row.qty = v;
-      changed = true;
-    }
+    row.qty = normalizeQty(raw);
+    refreshRowDom(orderId, idx);
   } else if (cell.classList.contains("po-name")) {
     if (raw !== row.po_name) {
       row.po_name = raw;
-      changed = true;
+      const m = matchProduct({ poName: raw, pack: row.pack, party: row.party });
+      if (m.code) {
+        row.code = m.code;
+        row.status = m.status;
+        row.master_name = m.master_name;
+      }
+      refreshRowDom(orderId, idx);
     }
-  }
-
-  // re-render row hints
-  refreshRowDom(orderId, idx);
-
-  if (ruleDraft) {
-    const ok = await askConfirm(
-      `Save rule?\n\n"${ruleDraft.pattern}" ${ruleDraft.pack || ""}\n→ Code ${ruleDraft.code}\nParty: ${
-        ruleDraft.party || "*"
-      }`
-    );
-    if (ok) {
-      upsertRule(ruleDraft);
-      addBotText(`Rule saved: ${ruleDraft.pattern} → ${ruleDraft.code}`);
-    }
-  } else if (changed) {
-    // silent qty/name change only
   }
 }
 
@@ -867,137 +1284,129 @@ function refreshRowDom(orderId, idx) {
 async function copyText(text, okMsg) {
   try {
     await navigator.clipboard.writeText(text);
-    toast(okMsg || "Copied");
   } catch {
-    // fallback
     const ta = document.createElement("textarea");
     ta.value = text;
     document.body.appendChild(ta);
     ta.select();
     document.execCommand("copy");
     ta.remove();
-    toast(okMsg || "Copied");
   }
+  addBotText(okMsg || "Copied");
 }
 
-function toast(msg) {
-  addBotText(msg);
-}
+// ---------- Matching engine (strong) ----------
+const STOP = new Set(
+  "the and for of with tab tabs tablet tablets strip cream lotion syrup syp soap ml gm g mg bottle pack pcs of in on a an ta s t".split(
+    " "
+  )
+);
 
-// ---------- Matching engine ----------
+// common PO name → master brand aliases
+const ALIAS_BRAND = {
+  chandrika: "chk",
+  chk: "chk",
+  sloan: "sloans",
+  sloans: "sloans",
+  "lacto calamine": "lc",
+  lactocalamine: "lc",
+  "lc face": "lc",
+  caladryl: "caladryl",
+  glucovita: "glucovita",
+  naturolax: "naturolax",
+  mycospor: "mycospor",
+  canesten: "canesten",
+  alaspan: "alaspan",
+  benadon: "benadon",
+  digeplex: "digeplex",
+  ferradol: "ferradol",
+  supradyn: "supradyn",
+  neko: "neko",
+  littles: "littles",
+  becozyn: "becozym",
+  becozym: "becozym",
+  tetmosol: "tetmosol",
+};
+
 function matchProduct({ poName, pack, party }) {
   const nPo = norm(poName);
   const nPack = norm(pack);
-  const nParty = norm(party);
-
   if (!nPo) return { status: "red", code: "", note: "empty name" };
 
-  // 1) Rules exact-ish
+  // 1) Rules
   let bestRule = null;
   let bestRuleScore = 0;
   for (const r of state.rules) {
     const rp = norm(r.pattern);
     if (!rp) continue;
-    if (r.party && nParty && norm(r.party) !== nParty && !nParty.includes(norm(r.party))) {
-      // party-specific rule, skip if party mismatch when both present
-      if (norm(r.party).length > 2) continue;
-    }
     let score = 0;
     if (nPo === rp) score = 100;
-    else if (nPo.includes(rp) || rp.includes(nPo)) score = 80;
-    else {
-      // token overlap
-      score = tokenScore(nPo, rp) * 70;
-    }
+    else if (nPo.includes(rp) || rp.includes(nPo)) score = 86;
+    else score = tokenScore(nPo, rp) * 75;
     if (r.pack) {
       const rpk = norm(r.pack);
-      if (nPack && (nPack.includes(rpk) || rpk.includes(nPack) || packLooseEqual(nPack, rpk))) score += 15;
-      else if (nPack) score -= 25;
-    }
-    if (r.pack_exclude && nPack && norm(r.pack_exclude).split(/[,\s]+/).some((x) => x && nPack.includes(x))) {
-      score -= 50;
+      if (nPack && (nPack.includes(rpk) || rpk.includes(nPack) || packLooseEqual(nPack, rpk))) score += 12;
+      else if (nPack) score -= 20;
     }
     if (score > bestRuleScore) {
       bestRuleScore = score;
       bestRule = r;
     }
   }
-  if (bestRule && bestRuleScore >= 75 && bestRule.code) {
+  if (bestRule && bestRuleScore >= 78 && bestRule.code) {
     return {
       status: "green",
       code: bestRule.code,
       master_name: bestRule.note || "rule",
-      confidence: bestRuleScore,
-      note: "rule match",
+      confidence: bestRuleScore / 100,
+      note: "learned rule",
+      candidates: [],
     };
   }
 
-  // 2) Master list
-  if (!state.master.length) {
-    return { status: "red", code: "", note: "no master loaded" };
-  }
-
-  const candidates = [];
-  for (const p of state.master) {
-    const mn = norm(p.name);
-    let score = tokenScore(nPo, mn);
-    // boost brand first token
-    const poToks = tokens(nPo);
-    const mToks = tokens(mn);
-    if (poToks[0] && mToks[0] && poToks[0] === mToks[0]) score += 0.15;
-    // pack signals from master name
-    if (nPack) {
-      if (mn.includes(nPack.replace(/\s/g, "")) || packInText(nPack, mn)) score += 0.2;
-      // penalize form mismatch
-      if (isTab(nPo, nPack) && isSyrupName(mn)) score -= 0.5;
-      if (isSyrup(nPo, nPack) && isTabName(mn)) score -= 0.5;
-    } else {
-      if (isTab(nPo, "") && isSyrupName(mn)) score -= 0.35;
-      if (isSyrup(nPo, "") && isTabName(mn)) score -= 0.35;
-    }
-    // size numbers
-    const sizes = extractSizes(nPo + " " + nPack);
-    if (sizes.length) {
-      const masterSizes = extractSizes(mn);
-      if (masterSizes.some((s) => sizes.includes(s))) score += 0.15;
-    }
-    if (score >= 0.35) candidates.push({ p, score });
-  }
-  candidates.sort((a, b) => b.score - a.score);
-
-  if (!candidates.length) {
+  // 2) Master rank
+  const cands = rankMasterCandidates(poName, pack, 8);
+  if (!cands.length) {
     if (bestRule && bestRule.code && bestRuleScore >= 55) {
       return {
         status: "yellow",
         code: bestRule.code,
         master_name: "weak rule",
-        confidence: bestRuleScore,
-        note: "weak rule — check",
+        confidence: bestRuleScore / 100,
+        note: "weak rule",
+        candidates: [],
       };
     }
-    return { status: "red", code: "", note: "no match", confidence: 0 };
+    return { status: "red", code: "", note: "no match", confidence: 0, candidates: [] };
   }
 
-  const top = candidates[0];
-  const second = candidates[1];
-  const ambiguous = second && top.score - second.score < 0.08 && second.score > 0.45;
+  const top = cands[0];
+  const second = cands[1];
+  const unique = isUniqueBrandMatch(poName, cands);
+  const gap = second ? top.score - second.score : 1;
+  const candidates = cands.map((c) => ({ code: c.p.code, name: c.p.name, score: c.score }));
 
-  if (top.score >= 0.62 && !ambiguous) {
+  if ((top.score >= 0.78 && gap >= 0.08) || (unique && top.score >= 0.5) || top.score >= 0.9) {
     return {
       status: "green",
       code: top.p.code,
       master_name: top.p.name,
       confidence: top.score,
-      note: "",
+      note: unique ? "unique brand" : "",
+      candidates,
     };
   }
-  if (top.score >= 0.45) {
+  if (top.score >= 0.48) {
     return {
       status: "yellow",
       code: top.p.code,
-      master_name: top.p.name + (second ? ` | alt: ${second.p.name}` : ""),
+      master_name: cands
+        .slice(0, 3)
+        .map((c) => c.p.name)
+        .join(" | "),
       confidence: top.score,
-      note: ambiguous ? "ambiguous — verify" : "low confidence",
+      note: gap < 0.1 ? "ambiguous" : "check",
+      candidates,
     };
   }
   return {
@@ -1005,142 +1414,220 @@ function matchProduct({ poName, pack, party }) {
     code: "",
     master_name: top.p.name,
     confidence: top.score,
-    note: "low score — fill code",
+    note: "low score",
+    candidates,
   };
+}
+
+function rankMasterCandidates(poName, pack, limit = 6) {
+  if (!state.master.length) return [];
+  const nPo = norm(poName);
+  const nPack = norm(pack || "");
+  const b = brandToken(poName);
+  let pool = state.master;
+  if (b && state.brandIndex.has(b)) {
+    const branded = state.brandIndex.get(b);
+    // also include alias brand pool
+    pool = branded.length ? branded : state.master;
+  }
+  // if alias maps elsewhere
+  for (const [k, v] of Object.entries(ALIAS_BRAND)) {
+    if (nPo.includes(k) && state.brandIndex.has(v)) {
+      pool = [...state.brandIndex.get(v)];
+      break;
+    }
+  }
+
+  const out = [];
+  // always score full master if pool small mismatch
+  const scoreList = (list) => {
+    for (const p of list) {
+      let score = tokenScore(nPo, norm(p.name));
+      const pb = brandToken(p.name);
+      if (b && pb && b === pb) score += 0.28;
+      // substring brand
+      if (b && norm(p.name).includes(b)) score += 0.12;
+      // pack / size
+      if (nPack) {
+        const packNums = nPack.match(/\d+/g) || [];
+        const mn = norm(p.name);
+        if (packNums.some((num) => mn.includes(num))) score += 0.14;
+        if (packLooseEqual(nPack.replace(/\s/g, ""), mn.replace(/\s/g, ""))) score += 0.1;
+        if (isTab(nPo, nPack) && isSyrupName(mn)) score -= 0.45;
+        if (isSyrup(nPo, nPack) && isTabName(mn)) score -= 0.45;
+        if (isTab(nPo, nPack) && isTabName(mn)) score += 0.1;
+        if (/cream|crea/.test(nPo + nPack) && /cream|crea/.test(mn)) score += 0.1;
+        if (/lotion/.test(nPo) && /lotion/.test(mn)) score += 0.1;
+        if (/soap/.test(nPo) && /soap/.test(mn)) score += 0.12;
+        if (/liniment|sloan/.test(nPo) && /liniment|sloan/.test(mn)) score += 0.15;
+      } else {
+        const mn = norm(p.name);
+        if (isTab(nPo, "") && isSyrupName(mn)) score -= 0.35;
+        if (isSyrup(nPo, "") && isTabName(mn)) score -= 0.35;
+      }
+      // mg strength
+      const mg = (nPo + " " + nPack).match(/(\d+)\s*mg/);
+      if (mg && norm(p.name).includes(mg[1])) score += 0.08;
+      if (score >= 0.28) out.push({ p, score });
+    }
+  };
+  scoreList(pool);
+  // if weak, search full master
+  out.sort((a, b) => b.score - a.score);
+  if (!out.length || out[0].score < 0.45) {
+    out.length = 0;
+    scoreList(state.master);
+    out.sort((a, b) => b.score - a.score);
+  }
+  // unique by code
+  const seen = new Set();
+  const uniq = [];
+  for (const c of out) {
+    if (seen.has(c.p.code)) continue;
+    seen.add(c.p.code);
+    uniq.push(c);
+    if (uniq.length >= limit) break;
+  }
+  return uniq;
+}
+
+function searchMaster(query, limit = 8) {
+  const q = norm(query);
+  if (!q) return [];
+  const scored = [];
+  for (const p of state.master) {
+    let s = tokenScore(q, norm(p.name));
+    if (norm(p.name).includes(q)) s += 0.3;
+    if (String(p.code).includes(query.trim())) s += 0.5;
+    if (s >= 0.3) scored.push({ ...p, _s: s });
+  }
+  scored.sort((a, b) => b._s - a._s);
+  return scored.slice(0, limit);
 }
 
 function applyQtyRules(row) {
   const nPo = norm(row.po_name);
-  const nParty = norm(row.party);
   for (const r of state.rules) {
     if (!r.qty_multiple) continue;
     const rp = norm(r.pattern);
     if (!rp) continue;
     if (!(nPo.includes(rp) || rp.includes(nPo) || tokenScore(nPo, rp) > 0.7)) continue;
-    if (r.party && nParty && norm(r.party) !== nParty && !nParty.includes(norm(r.party))) continue;
     const m = Number(r.qty_multiple);
-    if (m > 1 && row.qty != null) {
-      // do not auto-change qty silently; only flag in note if not multiple
-      if (Number(row.qty) % m !== 0) {
-        row.note = (row.note ? row.note + " · " : "") + `qty should be ×${m}`;
-        if (row.status === "green") row.status = "yellow";
-      }
+    if (m > 1 && row.qty != null && Number(row.qty) % m !== 0) {
+      row.note = (row.note ? row.note + " · " : "") + `qty should be ×${m}`;
+      if (row.status === "green") row.status = "yellow";
     }
   }
 }
 
 // ---------- Gemini ----------
 async function geminiParseOrder({ userText, localText, parts }) {
-  const masterHint = state.master
-    .slice(0, 80)
-    .map((p) => `${p.code}|${p.name}`)
-    .join("\n");
+  // send smarter master slice: brands present in text
+  const textAll = (userText || "") + "\n" + (localText || "");
+  const brands = new Set();
+  for (const p of state.master) {
+    const b = brandToken(p.name);
+    if (b && norm(textAll).includes(b)) brands.add(b);
+  }
+  for (const k of Object.keys(ALIAS_BRAND)) {
+    if (norm(textAll).includes(k)) brands.add(ALIAS_BRAND[k]);
+  }
+  let masterHint = [];
+  for (const b of brands) {
+    const list = state.brandIndex.get(b) || [];
+    for (const p of list.slice(0, 12)) masterHint.push(`${p.code}|${p.name}`);
+  }
+  if (masterHint.length < 30) {
+    masterHint = masterHint.concat(state.master.slice(0, 60).map((p) => `${p.code}|${p.name}`));
+  }
+  masterHint = [...new Set(masterHint)].slice(0, 120).join("\n");
 
-  const sys = `You extract purchase order line items from messy distributor POs (PDF text, Excel, photos, plain text).
-Return ONLY valid JSON (no markdown) with shape:
+  const sys = `Extract purchase order lines from messy distributor POs.
+Return ONLY JSON:
 {
-  "party": "buyer or seller party name if visible",
+  "party": "",
   "order_no": "",
   "order_date": "",
-  "items": [
-    { "po_name": "exact product name as written in PO", "pack": "pack/size as written", "qty": number, "party": "" }
-  ]
+  "items": [ { "po_name": "exact PO product text", "pack": "size/pack", "qty": number } ]
 }
 Rules:
-- po_name = exactly how it appears on the PO (keep distributor wording).
-- qty = ordered quantity (numeric). Ignore free schemes unless clearly the main qty.
+- Keep distributor product wording in po_name.
+- qty = main order qty (number).
 - Do NOT invent material codes.
-- Skip headers, totals, addresses.
-- One row per product line.
-- If image/PDF, read all product lines carefully.`;
+- Skip headers/totals/addresses.
+- Read every product line.`;
 
-  const contents = [];
-  const userParts = [];
-
-  userParts.push({
-    text:
-      sys +
-      "\n\nUser message:\n" +
-      (userText || "(see attachments)") +
-      "\n\nLocal extracted text (may be incomplete):\n" +
-      truncate(localText || "", 120000) +
-      "\n\nSample master products (for context only, do not output codes):\n" +
-      masterHint,
-  });
-
+  const userParts = [
+    {
+      text:
+        sys +
+        "\n\nUser message:\n" +
+        (userText || "(attachments)") +
+        "\n\nExtracted text:\n" +
+        truncate(localText || "", 100000) +
+        "\n\nMaster catalog excerpt (context only):\n" +
+        masterHint,
+    },
+  ];
   for (const p of parts) userParts.push(p);
 
-  contents.push({ role: "user", parts: userParts });
-
   const data = await geminiRequest({
-    contents,
-    generationConfig: {
-      temperature: 0.1,
-      responseMimeType: "application/json",
-    },
+    contents: [{ role: "user", parts: userParts }],
+    generationConfig: { temperature: 0.05, responseMimeType: "application/json" },
   });
-
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
   const json = safeJson(text);
   if (!json || !Array.isArray(json.items)) {
-    throw new Error("Could not parse order JSON from model. Try clearer photo/PDF or paste text.");
+    throw new Error("Order parse fail. Clearer PDF/photo or paste text try karo.");
   }
   return json;
 }
 
-async function geminiInterpretEdit({ message, rows, meta }) {
+async function geminiInterpretEdit({ message, rows, meta, toolContext, masterSize }) {
   const snapshot = rows.map((r, i) => ({
     row: i,
     code: r.code,
     qty: r.qty,
     po_name: r.po_name,
     pack: r.pack,
-    party: r.party,
     status: r.status,
   }));
 
-  const prompt = `You are helping edit a PO matching table and save durable rules.
-Current order meta: ${JSON.stringify(meta)}
-Current rows JSON:
-${JSON.stringify(snapshot)}
+  const prompt = `You are Mohan Order Creater brain. User fixes PO↔master mapping in Hinglish/English.
+Master has ${masterSize} products. You MUST use provided candidates (from local master search). NEVER invent codes not in candidates or current rows.
 
-User said: ${JSON.stringify(message)}
+Active order meta: ${JSON.stringify(meta)}
+Rows: ${JSON.stringify(snapshot)}
+Master candidates for weak rows: ${JSON.stringify(toolContext)}
+
+User: ${JSON.stringify(message)}
+
+If user says check master / ek hi hai / map / fix Benadon etc:
+- pick best candidate code for matching rows
+- emit row_updates + rules (pattern=po_name)
 
 Return ONLY JSON:
 {
-  "type": "edit" | "chat" | "info",
-  "message": "short human summary",
-  "row_updates": [ { "row": 0, "code": "", "qty": 0, "po_name": "", "pack": "" } ],
-  "rules": [
-     { "pattern": "ALASPAN TAB", "pack": "10TAB", "party": "", "code": "401353005", "qty_multiple": null, "note": "" }
-  ]
+  "type": "edit" | "chat",
+  "message": "short Hinglish summary of what you did",
+  "row_updates": [ { "row": 0, "po_name": "", "code": "", "qty": null, "master_name": "" } ],
+  "rules": [ { "pattern": "BENADON 40MG TAB", "pack": "15TAB", "code": "400016004", "note": "" } ]
 }
-Rules for you:
-- pattern = distributor PO name text to match later.
-- UPSERT style: one rule per pattern+pack+party (we replace old).
-- If user changes a code, emit both row_updates and rules.
-- If user only asks a question, type=chat and empty arrays.
-- Do not invent codes unless user stated the code OR it is already in the row.
-- qty_multiple only if user asked multiples/min case packs.`;
+If only a question with no change, type=chat.`;
 
   const data = await geminiRequest({
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
   });
   const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
-  const json = safeJson(text);
-  if (!json) return { type: "chat", message: text || "Could not interpret." };
-  return json;
+  return safeJson(text) || { type: "chat", message: text || "Samajh nahi aaya." };
 }
 
 async function geminiRequest({ contents, generationConfig }) {
   let model = resolveModel(state.model || "gemini-3.6-flash");
   state.model = model;
-
   const urlFor = (m) =>
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      m
-    )}:generateContent?key=${encodeURIComponent(state.apiKey)}`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(state.apiKey)}`;
 
   let res = await fetch(urlFor(model), {
     method: "POST",
@@ -1148,18 +1635,10 @@ async function geminiRequest({ contents, generationConfig }) {
     body: JSON.stringify({ contents, generationConfig }),
   });
   let body = await res.json().catch(() => ({}));
-
-  // Auto-fallback if model retired / not found
   const errMsg = body?.error?.message || "";
-  if (
-    !res.ok &&
-    (/no longer available|not found|is not found|not supported/i.test(errMsg) ||
-      res.status === 404)
-  ) {
-    const fallbacks = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash-lite"].filter(
-      (m) => m !== model
-    );
-    for (const fb of fallbacks) {
+  if (!res.ok && (/no longer available|not found|not supported/i.test(errMsg) || res.status === 404)) {
+    for (const fb of ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash-lite"]) {
+      if (fb === model) continue;
       res = await fetch(urlFor(fb), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1168,64 +1647,42 @@ async function geminiRequest({ contents, generationConfig }) {
       body = await res.json().catch(() => ({}));
       if (res.ok) {
         state.model = fb;
-        try {
-          localStorage.setItem(STORAGE.model, fb);
-        } catch (_) {}
+        localStorage.setItem(STORAGE.model, fb);
         break;
       }
     }
   }
-
   if (!res.ok) {
     const msg = body?.error?.message || res.statusText;
-    if (res.status === 429) throw new Error("API limit hit (429). Thoda wait karke dubara try karo.");
-    if (res.status === 400 && /API key/i.test(msg)) throw new Error("Invalid API key. Settings me check karo.");
-    throw new Error(msg || "Gemini request failed");
+    if (res.status === 429) throw new Error("API limit (429). Thoda wait karke try karo.");
+    if (res.status === 400 && /API key/i.test(msg)) throw new Error("Invalid API key.");
+    throw new Error(msg || "Gemini failed");
   }
   return body;
 }
 
-// ---------- File helpers ----------
+// ---------- Files ----------
 async function fileToModelPart(file) {
   const mime = file.type || guessMime(file.name);
   if (mime.startsWith("image/")) {
-    const b64 = await fileToBase64(file);
-    return { inlineData: { mimeType: mime, data: b64 } };
+    return { inlineData: { mimeType: mime, data: await fileToBase64(file) } };
   }
-  if (mime === "application/pdf") {
-    // send as inline pdf if small enough; also text extracted separately
-    if (file.size < 15 * 1024 * 1024) {
-      const b64 = await fileToBase64(file);
-      return { inlineData: { mimeType: "application/pdf", data: b64 } };
-    }
+  if ((mime === "application/pdf" || /\.pdf$/i.test(file.name)) && file.size < 15 * 1024 * 1024) {
+    return { inlineData: { mimeType: "application/pdf", data: await fileToBase64(file) } };
   }
-  // excel/csv/txt: text only via local extract
   return null;
 }
 
 async function extractLocalText(file) {
   const name = (file.name || "").toLowerCase();
   const mime = file.type || guessMime(file.name);
-  if (mime.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".csv")) {
-    return await file.text();
-  }
+  if (mime.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".csv")) return file.text();
   if (name.endsWith(".xlsx") || name.endsWith(".xls") || mime.includes("sheet")) {
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array" });
-    let out = "";
-    for (const sn of wb.SheetNames) {
-      out += `\n[Sheet ${sn}]\n`;
-      out += XLSX.utils.sheet_to_csv(wb.Sheets[sn]);
-    }
-    return out;
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    return wb.SheetNames.map((sn) => `[Sheet ${sn}]\n` + XLSX.utils.sheet_to_csv(wb.Sheets[sn])).join("\n");
   }
-  if (mime === "application/pdf" || name.endsWith(".pdf")) {
-    return await pdfToText(file);
-  }
-  if (mime.startsWith("image/")) {
-    return ""; // model reads image
-  }
-  // try text
+  if (mime === "application/pdf" || name.endsWith(".pdf")) return pdfToText(file);
+  if (mime.startsWith("image/")) return "";
   try {
     return await file.text();
   } catch {
@@ -1235,8 +1692,7 @@ async function extractLocalText(file) {
 
 async function pdfToText(file) {
   if (!window.pdfjsLib) return "";
-  const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
   let text = "";
   const max = Math.min(pdf.numPages, 20);
   for (let i = 1; i <= max; i++) {
@@ -1267,7 +1723,6 @@ function guessMime(name = "") {
   if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
   if (n.endsWith(".webp")) return "image/webp";
   if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  if (n.endsWith(".xls")) return "application/vnd.ms-excel";
   if (n.endsWith(".csv")) return "text/csv";
   if (n.endsWith(".txt")) return "text/plain";
   return "application/octet-stream";
@@ -1284,7 +1739,15 @@ function norm(s) {
 function tokens(s) {
   return norm(s)
     .split(" ")
-    .filter((t) => t && t.length > 1 && !["the", "and", "for", "of", "with"].includes(t));
+    .filter((t) => t && t.length > 1 && !STOP.has(t));
+}
+function brandToken(s) {
+  const n = norm(s);
+  for (const [k, v] of Object.entries(ALIAS_BRAND)) {
+    if (n.includes(k)) return v;
+  }
+  const t = tokens(s);
+  return t[0] || "";
 }
 function tokenScore(a, b) {
   const ta = new Set(tokens(a));
@@ -1292,49 +1755,30 @@ function tokenScore(a, b) {
   if (!ta.size || !tb.size) return 0;
   let inter = 0;
   for (const t of ta) if (tb.has(t)) inter++;
-  const union = new Set([...ta, ...tb]).size;
-  // bias toward coverage of PO tokens
   const cover = inter / ta.size;
-  const jacc = inter / union;
-  return cover * 0.65 + jacc * 0.35;
+  const jacc = inter / new Set([...ta, ...tb]).size;
+  return cover * 0.7 + jacc * 0.3;
 }
 function packLooseEqual(a, b) {
-  const x = a.replace(/\s/g, "");
-  const y = b.replace(/\s/g, "");
-  return x === y || x.includes(y) || y.includes(x);
-}
-function packInText(pack, text) {
-  const p = pack.replace(/\s/g, "");
-  const t = text.replace(/\s/g, "");
-  return t.includes(p);
-}
-function extractSizes(s) {
-  const out = [];
-  const re = /(\d+(?:\.\d+)?)\s*(ml|mg|gm|g|kg|tab|tabs|s|mm)?/gi;
-  let m;
-  while ((m = re.exec(String(s)))) {
-    out.push(norm(m[1] + (m[2] || "")));
-  }
-  return out;
+  return a === b || a.includes(b) || b.includes(a);
 }
 function isTab(name, pack) {
   return /\b(tab|tabs|tablet|tablets|strip)\b/.test(norm(name + " " + pack));
 }
 function isSyrup(name, pack) {
-  return /\b(syrup|syp|suspension|bottle)\b/.test(norm(name + " " + pack)) || /\bml\b/.test(norm(pack));
+  return /\b(syrup|syp|suspension)\b/.test(norm(name + " " + pack));
 }
 function isTabName(n) {
   return /\b(tab|tablet|strip)\b/.test(n);
 }
 function isSyrupName(n) {
-  return /\b(syrup|syp|lotion|ml)\b/.test(n) && !/\btablet\b/.test(n);
+  return /\b(syrup|syp)\b/.test(n);
 }
 function normalizeQty(q) {
   if (q == null || q === "") return "";
   if (typeof q === "number" && !Number.isNaN(q)) return q;
-  const s = String(q).replace(/,/g, "").trim();
-  const m = s.match(/-?\d+(\.\d+)?/);
-  return m ? Number(m[0]) : s;
+  const m = String(q).replace(/,/g, "").match(/-?\d+(\.\d+)?/);
+  return m ? Number(m[0]) : String(q).trim();
 }
 function numOrNull(v) {
   if (v == null || v === "") return null;
@@ -1347,9 +1791,7 @@ function truncate(s, n) {
 function safeJson(text) {
   if (!text) return null;
   let t = text.trim();
-  if (t.startsWith("```")) {
-    t = t.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-  }
+  if (t.startsWith("```")) t = t.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
   try {
     return JSON.parse(t);
   } catch {

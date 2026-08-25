@@ -1,5 +1,5 @@
 /* Minimal service worker for PWA install / offline shell */
-const CACHE = "mohan-oc-v2";
+const CACHE = "mohan-oc-v3";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./master.json", "./manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

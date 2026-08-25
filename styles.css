@@ -53,6 +53,46 @@ button { cursor: pointer; }
   padding-right: var(--safe-right);
 }
 
+/* ----- Learning progress bar ----- */
+.learning-bar {
+  flex: 0 0 auto;
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.95);
+  z-index: 19;
+}
+.learning-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+.learning-meta b { color: var(--primary-2); font-weight: 700; }
+.learning-track {
+  height: 5px;
+  border-radius: 999px;
+  background: #1e293b;
+  overflow: hidden;
+}
+.learning-track i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary), var(--primary-2));
+  transition: width 0.35s ease;
+}
+.welcome .tips {
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
+.welcome .tips i {
+  color: #99f6e4;
+  font-style: normal;
+}
+
 /* ----- Header ----- */
 .topbar {
   flex: 0 0 auto;
