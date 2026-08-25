@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <meta name="description" content="Mohan Order Creater — PO to Material Code" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='14' width='64' height='64' fill='%230f766e'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='sans-serif'%3EM%3C/text%3E%3C/svg%3E" />
+  <title>Mohan Order Creater</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">M</span>
+        <div>
+          <h1>Mohan Order Creater</h1>
+          <p class="sub">PO → Code · Qty · Name</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button type="button" id="btnNewOrder" class="btn ghost" title="Clear chat for new order">+ New Order</button>
+        <button type="button" id="btnSettings" class="btn ghost" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <main id="chat" class="chat" aria-live="polite"></main>
+
+    <div id="composerWrap" class="composer-wrap">
+      <div id="attachPreview" class="attach-preview hidden"></div>
+      <div class="composer">
+        <label class="icon-btn" title="Attach PDF, Excel, image or text">
+          📎
+          <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv,.txt,.doc,.docx,image/*" multiple hidden />
+        </label>
+        <textarea id="msgInput" rows="1" placeholder="Paste order text or message… (Enter send, Shift+Enter new line)"></textarea>
+        <button type="button" id="btnSend" class="btn primary" title="Send">➤</button>
+      </div>
+      <p class="hint">Upload / paste PO → table <b>Code | Qty | PO Name</b>. Edit cell or chat to fix → Confirm saves rule.</p>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button type="button" class="btn ghost" id="btnCloseSettings">✕</button>
+      </div>
+      <label class="field">
+        <span>Gemini API Key <small>(saved only on this device)</small></span>
+        <div class="row">
+          <input type="password" id="apiKeyInput" placeholder="AIza…" autocomplete="off" />
+          <button type="button" id="btnToggleKey" class="btn ghost">Show</button>
+        </div>
+      </label>
+      <label class="field">
+        <span>Model</span>
+        <select id="modelSelect">
+          <option value="gemini-3.6-flash">gemini-3.6-flash (recommended)</option>
+          <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+          <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Master product file <small>(Excel — Material + Description)</small></span>
+        <input type="file" id="masterFileInput" accept=".xlsx,.xls,.csv" />
+        <p id="masterStatus" class="status-line">Loading bundled master…</p>
+      </label>
+      <div class="field">
+        <span>Rules</span>
+        <p id="rulesStatus" class="status-line">0 rules saved</p>
+        <div class="row gap">
+          <button type="button" id="btnExportRules" class="btn">Export rules JSON</button>
+          <label class="btn">
+            Import rules
+            <input type="file" id="importRulesInput" accept=".json" hidden />
+          </label>
+          <button type="button" id="btnClearRules" class="btn danger">Clear all rules</button>
+        </div>
+      </div>
+      <p class="fineprint">API key never goes to GitHub — only your browser. Orders are sent to Google Gemini API for parsing.</p>
+      <button type="button" id="btnSaveSettings" class="btn primary block">Save</button>
+    </div>
+  </div>
+
+  <!-- Confirm rule modal -->
+  <div id="confirmModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card sm">
+      <h2>Save rule?</h2>
+      <pre id="confirmBody" class="confirm-body"></pre>
+      <div class="row gap end">
+        <button type="button" id="btnConfirmNo" class="btn ghost">No</button>
+        <button type="button" id="btnConfirmYes" class="btn primary">Yes, save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

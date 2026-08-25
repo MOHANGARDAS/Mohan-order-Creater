@@ -1,0 +1,7 @@
+.env
+.env.*
+*.local
+.DS_Store
+# never commit secrets
+**/apiKey*
+**/secrets*
