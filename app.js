@@ -1498,7 +1498,7 @@ const STOP = new Set(
 const ALIAS_BRAND = {
   chandrika: "chk",
   chandirka: "chk",
-  chandrika soap: "chk",
+  "chandrika soap": "chk",
   chk: "chk",
   "chk soap": "chk",
   sloan: "sloans",

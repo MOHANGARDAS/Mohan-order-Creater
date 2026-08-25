@@ -1,5 +1,5 @@
 /* Network-first for app shell so phone always gets latest matching brain */
-const CACHE = "mohan-oc-v5";
+const CACHE = "mohan-oc-v6";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./master.json", "./manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
