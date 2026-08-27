@@ -1,7 +1,7 @@
 {
-  "name": "Mohan Order Creater",
-  "short_name": "Mohan OC",
-  "description": "PO to Material Code — Code | Qty | PO Name",
+  "name": "Mohan AI",
+  "short_name": "Mohan AI",
+  "description": "Advanced Gemini chatbot — tools, web, memory, orders",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0b1220",

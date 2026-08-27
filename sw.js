@@ -1,13 +1,5 @@
-/* Mohan Order Creater v7 — network-first app shell, offline cache fallback */
-const CACHE = "mohan-oc-v8";
-const ASSETS = [
-  "./",
-  "./index.html",
-  "./styles.css",
-  "./app.js",
-  "./master.json",
-  "./manifest.webmanifest",
-];
+const CACHE = "mohan-ai-v10";
+const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./master.json", "./manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -16,20 +8,15 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
   );
 });
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
-
-  const isShell = /\.(js|css|html|json|webmanifest)(\?|$)/i.test(url.pathname) || url.pathname.endsWith("/");
-
-  if (isShell) {
+  const shell = /\.(js|css|html|json|webmanifest)(\?|$)/i.test(url.pathname) || url.pathname.endsWith("/");
+  if (shell) {
     e.respondWith(
       fetch(e.request)
         .then((res) => {
@@ -43,7 +30,6 @@ self.addEventListener("fetch", (e) => {
     );
     return;
   }
-
   e.respondWith(
     caches.match(e.request).then((cached) => {
       const fetched = fetch(e.request)

@@ -6,202 +6,177 @@
   <meta name="theme-color" content="#0f766e" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="description" content="Mohan Order Creater — PO matching dashboard" />
+  <meta name="description" content="Mohan AI — advanced Gemini chatbot with tools, memory, web search & order matching" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='14' width='64' height='64' fill='%230f766e'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='sans-serif'%3EM%3C/text%3E%3C/svg%3E" />
-  <title>Mohan Order Creater</title>
-  <link rel="stylesheet" href="styles.css?v=8" />
+  <title>Mohan AI</title>
+  <link rel="stylesheet" href="styles.css?v=10" />
 </head>
 <body>
   <div id="app" class="app">
-    <!-- Top bar -->
-    <header class="topbar">
-      <div class="brand">
-        <span class="logo" aria-hidden="true">M</span>
-        <div class="brand-text">
-          <h1>Mohan Order Creater</h1>
-          <p class="sub">PO → Code · Qty · Name · <span id="buildTag">v8</span></p>
-        </div>
+    <!-- Sidebar: history -->
+    <aside id="sidebar" class="sidebar" aria-label="Chat history">
+      <div class="sidebar-top">
+        <button type="button" id="btnNewChat" class="btn primary block">＋ New chat</button>
       </div>
-      <div class="top-stats" id="topStats" aria-live="polite">
-        <span class="pill">Master <b id="statMaster">0</b></span>
-        <span class="pill">Rules <b id="statRules">0</b></span>
-        <span class="pill">Match <b id="statMatch">—</b></span>
+      <div class="sidebar-search">
+        <input type="search" id="historySearch" class="input" placeholder="Search chats…" />
       </div>
-      <div class="top-actions">
-        <button type="button" id="btnTheme" class="btn icon" title="Toggle dark/light">◐</button>
-        <button type="button" id="btnNew" class="btn ghost">+ New</button>
-        <button type="button" id="btnSettings" class="btn icon" title="Settings" aria-label="Settings">⚙</button>
+      <nav id="chatList" class="chat-list" aria-label="Conversations"></nav>
+      <div class="sidebar-foot">
+        <button type="button" id="btnMemory" class="btn ghost block sm">🧠 Memory</button>
+        <button type="button" id="btnConnectors" class="btn ghost block sm">🔌 Connectors</button>
+        <button type="button" id="btnSettings" class="btn ghost block sm">⚙ Settings</button>
+        <p class="build">Mohan AI · v10</p>
       </div>
-    </header>
+    </aside>
 
-    <!-- Learning strip -->
-    <div class="learn-strip" id="learnStrip">
-      <div class="learn-meta">
-        <span>🧠 Learning <b id="learnPct">0%</b></span>
-        <span id="learnDetail">Upload a PO to start</span>
-      </div>
-      <div class="learn-track"><i id="learnBar" style="width:0%"></i></div>
-    </div>
-
-    <!-- Dual pane -->
-    <div class="workspace">
-      <!-- LEFT: source / preview -->
-      <section class="pane pane-left" aria-label="PO source">
-        <div class="pane-head">
-          <h2>PO Source</h2>
-          <div class="pane-head-actions">
-            <label class="btn primary sm">
-              📎 Upload
-              <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv,.txt,image/*" multiple hidden />
-            </label>
+    <!-- Main chat -->
+    <main class="main">
+      <header class="topbar">
+        <button type="button" id="btnMenu" class="btn icon" aria-label="Menu">☰</button>
+        <div class="brand">
+          <span class="logo">M</span>
+          <div>
+            <h1 id="chatTitle">Mohan AI</h1>
+            <p class="sub" id="chatSub">Gemini · tools · web · orders</p>
           </div>
         </div>
-
-        <div id="dropZone" class="drop-zone">
-          <div id="previewEmpty" class="preview-empty">
-            <div class="preview-icon">📄</div>
-            <p><b>Drop PDF / Excel / image</b> or paste text below</p>
-            <p class="muted">Fuzzy match against master.json · offline-ready</p>
-          </div>
-          <div id="previewFrame" class="preview-frame hidden"></div>
+        <div class="top-actions">
+          <button type="button" id="btnTheme" class="btn icon" title="Theme">◐</button>
+          <button type="button" id="btnExportChat" class="btn ghost sm">Export</button>
         </div>
+      </header>
 
-        <div class="source-text-wrap">
-          <label class="field-label" for="sourceText">Or paste PO text</label>
-          <textarea id="sourceText" rows="4" placeholder="Paste order lines here…"></textarea>
+      <!-- Tool chips -->
+      <div class="tool-bar" id="toolBar">
+        <label class="chip-toggle" title="Show model thinking">
+          <input type="checkbox" id="chkThinking" />
+          <span>💭 Thinking</span>
+        </label>
+        <label class="chip-toggle" title="Google Search grounding">
+          <input type="checkbox" id="chkWeb" checked />
+          <span>🌐 Web</span>
+        </label>
+        <label class="chip-toggle" title="Order / master tools">
+          <input type="checkbox" id="chkOrderTools" checked />
+          <span>📦 Orders</span>
+        </label>
+        <label class="chip-toggle" title="Use saved memory">
+          <input type="checkbox" id="chkMemory" checked />
+          <span>🧠 Memory</span>
+        </label>
+        <span class="spacer"></span>
+        <span class="pill" id="statusPill">Ready</span>
+      </div>
+
+      <div id="messages" class="messages" aria-live="polite"></div>
+
+      <div class="composer-wrap">
+        <div id="attachPreview" class="attach-preview hidden"></div>
+        <div class="composer">
+          <label class="icon-btn" title="Attach files">
+            📎
+            <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv,.txt,.doc,.docx,image/*,.json" multiple hidden />
+          </label>
+          <textarea id="msgInput" rows="1" placeholder="Message Mohan AI… (orders, search, anything)" enterkeyhint="send"></textarea>
+          <button type="button" id="btnSend" class="btn primary send" aria-label="Send">➤</button>
         </div>
-
-        <div class="left-footer">
-          <input type="text" id="partyInput" class="input" placeholder="Party (optional)" />
-          <button type="button" id="btnProcess" class="btn primary block">Generate Match</button>
-        </div>
-      </section>
-
-      <!-- RIGHT: results form -->
-      <section class="pane pane-right" aria-label="Match results">
-        <div class="pane-head">
-          <h2>Match Results</h2>
-          <div class="pane-head-actions wrap">
-            <span class="badge-row" id="badgeSummary">
-              <span class="badge g">🟢 <b id="cGreen">0</b></span>
-              <span class="badge y">🟡 <b id="cYellow">0</b></span>
-              <span class="badge r">🔴 <b id="cRed">0</b></span>
-            </span>
-            <button type="button" id="btnFixAll" class="btn sm ghost" disabled>Fix All</button>
-            <button type="button" id="btnCopyExcel" class="btn sm primary" disabled>Copy Excel</button>
-          </div>
-        </div>
-
-        <div class="results-meta" id="resultsMeta">No order yet</div>
-
-        <div class="table-wrap" id="tableWrap">
-          <table class="match-table" id="matchTable">
-            <thead>
-              <tr>
-                <th class="col-st"></th>
-                <th>Code</th>
-                <th>Qty</th>
-                <th>PO Name</th>
-                <th>Pack</th>
-                <th>Conf.</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="matchBody">
-              <tr class="empty-row"><td colspan="7">Upload a PO and press <b>Generate Match</b></td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Assist chat (compact) -->
-        <div class="assist">
-          <div class="assist-log" id="assistLog" aria-live="polite"></div>
-          <div class="assist-compose">
-            <input type="text" id="assistInput" class="input" placeholder="e.g. Chandrika master me check · Benadon 400016004" />
-            <button type="button" id="btnAssist" class="btn primary sm">Send</button>
-          </div>
-        </div>
-      </section>
-    </div>
+        <p class="hint">Enter send · Shift+Enter newline · Tools: web search, master match, memory, code copy</p>
+      </div>
+    </main>
   </div>
 
-  <!-- Settings modal -->
-  <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true">
+  <!-- Settings -->
+  <div id="settingsModal" class="modal hidden" role="dialog">
     <div class="modal-card">
       <div class="modal-head">
         <h2>Settings</h2>
-        <button type="button" class="btn icon" id="btnCloseSettings" aria-label="Close">✕</button>
+        <button type="button" class="btn icon" id="btnCloseSettings">✕</button>
       </div>
-
       <label class="field">
-        <span>Gemini API Key <small>(this device only)</small></span>
+        <span>Gemini API Key <small>(device only)</small></span>
         <div class="row">
           <input type="password" id="apiKeyInput" class="input" placeholder="AIza…" autocomplete="off" />
           <button type="button" id="btnToggleKey" class="btn ghost sm">Show</button>
         </div>
       </label>
-
       <label class="field">
         <span>Model</span>
         <select id="modelSelect" class="input">
-          <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+          <option value="gemini-3.6-flash">gemini-3.6-flash (recommended)</option>
           <option value="gemini-2.5-flash">gemini-2.5-flash</option>
           <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
         </select>
       </label>
-
       <label class="field">
-        <span>Master products (Excel)</span>
-        <input type="file" id="masterFileInput" accept=".xlsx,.xls,.csv" />
-        <p class="status-line" id="masterStatus">Loading…</p>
+        <span>System personality</span>
+        <textarea id="systemPrompt" class="input" rows="3" placeholder="Optional extra instructions…"></textarea>
       </label>
-
+      <label class="field">
+        <span>Master products Excel</span>
+        <input type="file" id="masterFileInput" accept=".xlsx,.xls,.csv" />
+        <p class="status-line" id="masterStatus">—</p>
+      </label>
       <div class="field">
-        <span>Rules & learning</span>
-        <p class="status-line" id="rulesStatus">0 rules</p>
+        <span>Data</span>
         <div class="row wrap gap">
-          <button type="button" id="btnExportRules" class="btn sm">Export JSON</button>
-          <label class="btn sm">Import<input type="file" id="importRulesInput" accept=".json" hidden /></label>
-          <button type="button" id="btnClearRules" class="btn sm danger">Clear rules</button>
+          <button type="button" id="btnExportAll" class="btn sm">Export all data</button>
+          <label class="btn sm">Import data<input type="file" id="importAllInput" accept=".json" hidden /></label>
+          <button type="button" id="btnClearHistory" class="btn sm danger">Clear history</button>
         </div>
       </div>
-
-      <label class="field row-check">
-        <input type="checkbox" id="chkAutoLearn" checked />
-        <span>Auto-save high-confidence matches as rules</span>
-      </label>
-
-      <p class="fineprint">Codes come from master/rules (local fuzzy match). Gemini only parses messy PO text/PDF. Key never goes to GitHub.</p>
+      <p class="fineprint">API key stays in this browser. Web search uses Gemini Google Search grounding. Order codes only from master/rules.</p>
       <button type="button" id="btnSaveSettings" class="btn primary block">Save</button>
     </div>
   </div>
 
-  <!-- Confirm -->
-  <div id="confirmModal" class="modal hidden" role="dialog" aria-modal="true">
+  <!-- Memory -->
+  <div id="memoryModal" class="modal hidden" role="dialog">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>🧠 Memory</h2>
+        <button type="button" class="btn icon" id="btnCloseMemory">✕</button>
+      </div>
+      <p class="muted sm">Facts Mohan remembers across chats (local).</p>
+      <div id="memoryList" class="memory-list"></div>
+      <div class="row gap">
+        <input type="text" id="memoryInput" class="input" placeholder="Add memory… e.g. My company is ATOR" />
+        <button type="button" id="btnAddMemory" class="btn primary sm">Add</button>
+      </div>
+      <button type="button" id="btnClearMemory" class="btn danger sm" style="margin-top:10px">Clear all memory</button>
+    </div>
+  </div>
+
+  <!-- Connectors -->
+  <div id="connectorsModal" class="modal hidden" role="dialog">
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <h2>🔌 Connectors & tools</h2>
+        <button type="button" class="btn icon" id="btnCloseConnectors">✕</button>
+      </div>
+      <div class="conn-grid" id="connGrid"></div>
+      <p class="fineprint">Built-in tools run in-browser. Google Workspace deep OAuth needs admin app; here: Web Search, Master/Orders, Clipboard, Download, URL fetch, local files.</p>
+    </div>
+  </div>
+
+  <!-- Order result expand -->
+  <div id="confirmModal" class="modal hidden" role="dialog">
     <div class="modal-card sm">
-      <h2>Save rule?</h2>
+      <h2 id="confirmTitle">Confirm</h2>
       <pre id="confirmBody" class="confirm-body"></pre>
       <div class="row end gap">
         <button type="button" id="btnConfirmNo" class="btn ghost">No</button>
-        <button type="button" id="btnConfirmYes" class="btn primary">Yes, save</button>
+        <button type="button" id="btnConfirmYes" class="btn primary">Yes</button>
       </div>
     </div>
   </div>
 
-  <!-- Candidate picker -->
-  <div id="pickModal" class="modal hidden" role="dialog" aria-modal="true">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2 id="pickTitle">Choose match</h2>
-        <button type="button" class="btn icon" id="btnClosePick">✕</button>
-      </div>
-      <div id="pickList" class="pick-list"></div>
-    </div>
-  </div>
+  <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script src="app.js?v=8" type="module"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="app.js?v=10" type="module"></script>
 </body>
 </html>
