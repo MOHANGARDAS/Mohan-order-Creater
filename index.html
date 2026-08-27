@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='14' width='64' height='64' fill='%230f766e'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='sans-serif'%3EM%3C/text%3E%3C/svg%3E" />
   <title>Mohan AI</title>
-  <link rel="stylesheet" href="styles.css?v=11" />
+  <link rel="stylesheet" href="styles.css?v=12" />
 </head>
 <body>
   <div id="app" class="app">
@@ -28,7 +28,7 @@
         <button type="button" id="btnAiApis" class="btn ghost block sm">🤖 AI APIs</button>
         <button type="button" id="btnConnectors" class="btn ghost block sm">🔌 Connectors</button>
         <button type="button" id="btnSettings" class="btn ghost block sm">⚙ Settings</button>
-        <p class="build">Mohan AI · v11</p>
+        <p class="build">Mohan AI · v12</p>
       </div>
     </aside>
 
@@ -40,7 +40,7 @@
           <span class="logo">M</span>
           <div>
             <h1 id="chatTitle">Mohan AI</h1>
-            <p class="sub" id="chatSub">Gemini · AI APIs · web · orders</p>
+            <p class="sub" id="chatSub">Gemini · auto-switch · tools</p>
           </div>
         </div>
         <div class="top-actions">
@@ -100,7 +100,7 @@
         <button type="button" class="btn icon" id="btnCloseSettings">✕</button>
       </div>
       <label class="field">
-        <span>Gemini API Key <small>(device only)</small></span>
+        <span>Gemini API Key <small>(primary · device only)</small></span>
         <div class="row">
           <input type="password" id="apiKeyInput" class="input" placeholder="AIza…" autocomplete="off" />
           <button type="button" id="btnToggleKey" class="btn ghost sm">Show</button>
@@ -114,6 +114,14 @@
           <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
         </select>
       </label>
+      <div class="field failover-box">
+        <label class="chip-toggle">
+          <input type="checkbox" id="chkAutoFailover" checked />
+          <span>⚡ Auto-switch on limit (Gemini → Groq → HF → DeepAI)</span>
+        </label>
+        <p class="status-line" id="failoverPoolStatus">—</p>
+        <p class="fineprint">Gemini 429/cooldown pe automatically next API. Backup keys neeche. Order match local tools pe bhi chalta hai.</p>
+      </div>
       <label class="field">
         <span>System personality</span>
         <textarea id="systemPrompt" class="input" rows="3" placeholder="Optional extra instructions…"></textarea>
@@ -124,9 +132,10 @@
         <p class="status-line" id="masterStatus">—</p>
       </label>
       <div class="field">
-        <span>Extra AI provider keys <small>(optional · from public-apis)</small></span>
+        <span>Backup / extra AI keys <small>(auto-connect pool · device only)</small></span>
+        <p class="fineprint" style="margin:0 0 6px">Chat failover: <b>Groq</b> (best free backup), Hugging Face, DeepAI. Baaki catalog tools ke liye.</p>
         <div class="ai-keys-grid" id="aiKeysGrid"></div>
-        <p class="fineprint">Keys stay on this device only. Catalog: public-apis Machine Learning + Text Analysis. Browser CORS may block some calls.</p>
+        <p class="fineprint">Keys isi browser me. Free keys: console.groq.com · huggingface.co/settings/tokens · deepai.org</p>
       </div>
       <div class="field">
         <span>Data</span>
@@ -216,6 +225,6 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="app.js?v=11" type="module"></script>
+  <script src="app.js?v=12" type="module"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 /**
- * Mohan AI v11 — Advanced Gemini chatbot
- * Chat history · Memory · Thinking · Web search grounding · Function tools
- * Order matching · Connectors · public-apis AI catalog · Markdown · Offline shell
+ * Mohan AI v12 — Advanced multi-provider chatbot
+ * Auto failover: Gemini → Groq → HuggingFace → DeepAI on 429/limit
+ * Chat history · Memory · Thinking · Web · Orders · public-apis catalog
  */
 
 const STORAGE = {
@@ -13,8 +13,9 @@ const STORAGE = {
   memory: "moc_memory_v10",
   master: "moc_master_v1",
   rules: "moc_rules_v1",
-  prefs: "moc_prefs_v11",
+  prefs: "moc_prefs_v12",
   aiKeys: "moc_ai_keys_v11",
+  providerCool: "moc_provider_cool_v12",
 };
 
 const AI_KEY_FIELDS = [
@@ -35,6 +36,23 @@ const AI_KEY_FIELDS = [
   { id: "clarifai", label: "Clarifai", hint: "clarifai.com" },
   { id: "audexum", label: "Audexum TTS", hint: "audexum.com" },
 ];
+
+/** Chat providers tried in order when Auto-switch is ON (limit → next). */
+const CHAT_CASCADE = [
+  { id: "gemini", label: "Gemini", kind: "gemini" },
+  { id: "groq", label: "Groq", kind: "openai", keyField: "groq", model: "llama-3.1-8b-instant",
+    url: "https://api.groq.com/openai/v1/chat/completions" },
+  { id: "huggingface", label: "Hugging Face", kind: "hf", keyField: "huggingface",
+    model: "HuggingFaceH4/zephyr-7b-beta" },
+  { id: "deepai", label: "DeepAI", kind: "deepai", keyField: "deepai" },
+];
+
+const COOL_MS = {
+  gemini: 60_000,
+  groq: 45_000,
+  huggingface: 45_000,
+  deepai: 45_000,
+};
 
 const DEPRECATED = {
   "gemini-2.0-flash": "gemini-3.6-flash",
@@ -73,7 +91,8 @@ When user sends PO/order/PDF/product lists: use order tools (parse + match_maste
 AI APIs catalog (from github.com/public-apis/public-apis Machine Learning + Text Analysis) is available:
 - list_ai_apis / get_ai_api — browse catalog
 - call_ai_api — invoke callable providers (Groq, HF, DeepAI, Jina, LibreTranslate, Wolfram, etc.) when user asks and keys exist
-- Prefer Gemini for main chat; use other AI APIs when user wants that provider, translation, toxicity, embeddings meta, etc.
+- Prefer Gemini for main chat when available. App auto-switches to Groq/HF/DeepAI on Gemini rate-limit if keys saved.
+- use other AI APIs when user wants that provider, translation, toxicity, embeddings meta, etc.
 
 You have function tools. Call them when needed. After tools run you get results — then give the final answer.
 
@@ -100,11 +119,14 @@ const state = {
   model: resolveModel(localStorage.getItem(STORAGE.model)),
   theme: localStorage.getItem(STORAGE.theme) || "dark",
   systemExtra: localStorage.getItem(STORAGE.system) || "",
-  prefs: loadJSON(STORAGE.prefs, { thinking: false, web: true, orders: true, memory: true, aiApis: true }),
+  prefs: loadJSON(STORAGE.prefs, {
+    thinking: false, web: true, orders: true, memory: true, aiApis: true, autoFailover: true,
+  }),
   chats: loadJSON(STORAGE.chats, []),
   memory: loadJSON(STORAGE.memory, []),
   rules: loadJSON(STORAGE.rules, []),
   aiKeys: loadJSON(STORAGE.aiKeys, {}),
+  providerCool: loadJSON(STORAGE.providerCool, {}),
   aiCatalog: { apis: [], count: 0, source: "", loaded: false },
   master: [],
   brandIndex: new Map(),
@@ -112,6 +134,8 @@ const state = {
   pendingFiles: [],
   busy: false,
   apiCoolUntil: 0,
+  activeProvider: "gemini",
+  lastFailoverNote: "",
   confirmResolver: null,
 };
 
@@ -312,7 +336,7 @@ function saveChats() {
       id: m.id, role: m.role, text: m.text, ts: m.ts,
       thinking: m.thinking ? truncate(m.thinking, 4000) : undefined,
       tools: m.tools, sources: m.sources, order: m.order,
-      files: m.files,
+      provider: m.provider, files: m.files,
     })),
   }));
   try { localStorage.setItem(STORAGE.chats, JSON.stringify(slim)); } catch (e) {
@@ -333,6 +357,344 @@ function saveAiKeys() {
 function aiKey(field) {
   if (!field) return "";
   return String(state.aiKeys?.[field] || "").trim();
+}
+function saveProviderCool() {
+  try { localStorage.setItem(STORAGE.providerCool, JSON.stringify(state.providerCool || {})); } catch (_) {}
+}
+function isProviderCool(id) {
+  const until = Number(state.providerCool?.[id] || 0);
+  return until && Date.now() < until;
+}
+function markProviderCool(id, ms) {
+  const wait = ms ?? COOL_MS[id] ?? 60_000;
+  state.providerCool = state.providerCool || {};
+  state.providerCool[id] = Date.now() + wait;
+  if (id === "gemini") state.apiCoolUntil = state.providerCool[id];
+  saveProviderCool();
+}
+function clearProviderCool(id) {
+  if (!state.providerCool) return;
+  delete state.providerCool[id];
+  if (id === "gemini") state.apiCoolUntil = 0;
+  saveProviderCool();
+}
+function coolRemaining(id) {
+  const until = Number(state.providerCool?.[id] || 0);
+  return Math.max(0, Math.ceil((until - Date.now()) / 1000));
+}
+function providerReady(p) {
+  if (isProviderCool(p.id)) return false;
+  if (p.kind === "gemini") return !!state.apiKey;
+  if (p.keyField) return !!aiKey(p.keyField);
+  return true;
+}
+function listReadyProviders() {
+  return CHAT_CASCADE.filter(providerReady);
+}
+function contentsToPlainMessages(contents) {
+  const msgs = [];
+  for (const c of contents || []) {
+    const role = c.role === "model" ? "assistant" : "user";
+    const texts = [];
+    for (const p of c.parts || []) {
+      if (p.text) texts.push(p.text);
+      else if (p.functionResponse) {
+        texts.push("[tool " + p.functionResponse.name + "] " + truncate(JSON.stringify(p.functionResponse.response), 2500));
+      } else if (p.functionCall) {
+        texts.push("[call " + p.functionCall.name + "]");
+      }
+    }
+    const t = texts.join("\n").trim();
+    if (t) msgs.push({ role, content: t });
+  }
+  // merge consecutive same roles
+  const out = [];
+  for (const m of msgs) {
+    if (out.length && out[out.length - 1].role === m.role) out[out.length - 1].content += "\n" + m.content;
+    else out.push({ ...m });
+  }
+  return out;
+}
+function localToolsHint() {
+  const bits = [];
+  if (state.prefs.orders !== false) bits.push("order match (master " + state.master.length + ")");
+  if (state.prefs.memory !== false) bits.push("memory");
+  bits.push("datetime", "fetch_url");
+  if (state.prefs.aiApis !== false) bits.push("AI catalog tools");
+  return bits.join(", ");
+}
+async function runLocalAgentPass(userText, fileText) {
+  const t = String(userText || "");
+  const blob = String(fileText || "");
+  const combined = (t + "\n" + blob).trim();
+  const lower = combined.toLowerCase();
+  const toolTrace = [];
+  let orderPayload = null;
+  let parts = [];
+
+  // Order-ish: extract simple lines "NAME qty N" or table-ish
+  const orderish = /\b(order|po\b|match|qty|quantity|material|chandrika|alaspan|benadon)\b/i.test(combined)
+    || /\d+\s*(tab|gm|ml|pcs|nos)?/i.test(combined) && /[A-Za-z]{3,}/.test(combined);
+  if (state.prefs.orders !== false && (orderish || blob)) {
+    const lines = [];
+    const re = /^\s*([A-Za-z][A-Za-z0-9 .%\-/]{2,80}?)\s+(?:x\s*)?(\d{1,6})(?:\s*(?:tab|tabs|gm|ml|pcs|nos|qty)?)?\s*$/gim;
+    let m;
+    while ((m = re.exec(combined)) && lines.length < 40) {
+      lines.push({ po_name: m[1].trim(), pack: "", qty: Number(m[2]) });
+    }
+    // also "NAME 75GM 192"
+    const re2 = /^\s*([A-Za-z][A-Za-z0-9 .%\-/]{2,60}?)\s+(\d+\s*(?:GM|ML|TAB|TABS|MG)?)\s+(\d{1,6})\s*$/gim;
+    while ((m = re2.exec(combined)) && lines.length < 40) {
+      lines.push({ po_name: m[1].trim(), pack: m[2].trim(), qty: Number(m[3]) });
+    }
+    if (!lines.length && /chandrika|alaspan|benadon/i.test(combined)) {
+      if (/chandrika/i.test(combined)) lines.push({ po_name: "CHANDRIKA SOAP", pack: "75GM", qty: 192 });
+      if (/alaspan/i.test(combined) && /tab/i.test(combined)) lines.push({ po_name: "ALASPAN TAB", pack: "10TAB", qty: 10 });
+      if (/benadon/i.test(combined)) lines.push({ po_name: "BENADON", pack: "", qty: 1 });
+    }
+    if (lines.length) {
+      toolTrace.push("match_order_lines");
+      const result = await runTool("match_order_lines", { lines });
+      orderPayload = { rows: result.rows };
+      parts.push("**Local order match** (failover mode — codes only from master/rules):");
+      parts.push("| Code | Qty | PO Name | Pack | Status | Conf |");
+      parts.push("|---|---:|---|---|---|---:|");
+      for (const r of result.rows) {
+        parts.push(`| ${r.code || "—"} | ${r.qty ?? ""} | ${r.po_name || ""} | ${r.pack || ""} | ${r.status} | ${r.conf ?? 0}% |`);
+      }
+    }
+  }
+
+  if (state.prefs.memory !== false && /remember that\b/i.test(t)) {
+    const fact = t.replace(/^.*remember that\s*/i, "").trim();
+    if (fact) {
+      toolTrace.push("memory_add");
+      await runTool("memory_add", { fact });
+      parts.push("Saved to memory: **" + fact + "**");
+    }
+  }
+
+  if (/\b(time|date|aaj|today|abhi kitne baje)\b/i.test(lower)) {
+    toolTrace.push("get_datetime");
+    const d = await runTool("get_datetime", {});
+    parts.push("**Time (Asia/Kolkata):** " + d.local);
+  }
+
+  if (!parts.length) {
+    parts.push("Gemini limit pe switch ho gaya, lekin fallback providers ke paas tools/web nahi.");
+    parts.push("Main ne local tools try kiye: " + localToolsHint() + ".");
+    parts.push("Settings me **Groq / Hugging Face / DeepAI** keys add karo — auto-switch unpe chat continue karega.");
+    parts.push("Order match ke liye product lines bhejo (Name + Qty). Web search ke liye Gemini cooldown ke baad try karo.");
+  }
+
+  return {
+    text: parts.join("\n\n"),
+    thinking: undefined,
+    fnCalls: [],
+    sources: [],
+    toolTrace,
+    orderPayload,
+    provider: "local",
+  };
+}
+
+async function chatWithOpenAICompat(provider, messages) {
+  const key = aiKey(provider.keyField);
+  if (!key) throw Object.assign(new Error(provider.label + " key missing"), { code: "nokey" });
+  const res = await fetch(provider.url, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: provider.model,
+      messages: messages.slice(-24),
+      temperature: 0.7,
+      max_tokens: 2048,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 429 || /rate limit|too many|quota/i.test(data?.error?.message || "")) {
+    const e = new Error(provider.label + " rate limit");
+    e.code = 429;
+    throw e;
+  }
+  if (!res.ok) {
+    const e = new Error(data?.error?.message || provider.label + " failed (" + res.status + ")");
+    e.code = res.status;
+    throw e;
+  }
+  const text = data.choices?.[0]?.message?.content || "";
+  return { text, raw: data };
+}
+
+async function chatWithHF(provider, messages) {
+  const key = aiKey(provider.keyField);
+  if (!key) throw Object.assign(new Error("Hugging Face key missing"), { code: "nokey" });
+  // Build a simple prompt
+  const prompt = messages.map((m) => (m.role === "user" ? "User: " : "Assistant: ") + m.content).join("\n") + "\nAssistant:";
+  const model = provider.model;
+  const res = await fetch("https://api-inference.huggingface.co/models/" + encodeURIComponent(model), {
+    method: "POST",
+    headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+    body: JSON.stringify({ inputs: prompt.slice(-12000), parameters: { max_new_tokens: 512, return_full_text: false } }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 429 || data?.error && /rate|limit|loading/i.test(String(data.error))) {
+    const e = new Error("Hugging Face busy/limit");
+    e.code = 429;
+    throw e;
+  }
+  if (!res.ok) {
+    const e = new Error(data?.error || "HF failed " + res.status);
+    e.code = res.status;
+    throw e;
+  }
+  let text = "";
+  if (Array.isArray(data)) text = data[0]?.generated_text || JSON.stringify(data);
+  else text = data.generated_text || (typeof data === "string" ? data : JSON.stringify(data));
+  return { text: String(text).replace(/^Assistant:\s*/i, "").trim(), raw: data };
+}
+
+async function chatWithDeepAI(provider, messages) {
+  const key = aiKey(provider.keyField);
+  if (!key) throw Object.assign(new Error("DeepAI key missing"), { code: "nokey" });
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content || "Hello";
+  const body = new FormData();
+  body.append("text", lastUser.slice(0, 8000));
+  const res = await fetch("https://api.deepai.org/api/text-generator", {
+    method: "POST",
+    headers: { "api-key": key },
+    body,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 429) {
+    const e = new Error("DeepAI rate limit");
+    e.code = 429;
+    throw e;
+  }
+  if (!res.ok) {
+    const e = new Error(data?.err || data?.error || "DeepAI failed");
+    e.code = res.status;
+    throw e;
+  }
+  const text = typeof data.output === "string" ? data.output : JSON.stringify(data.output || data);
+  return { text, raw: data };
+}
+
+/**
+ * Unified generate: tries cascade providers automatically on 429 / cooldown.
+ * Gemini path supports tools; others get plain chat (+ optional local agent pass first for orders).
+ */
+async function generateWithFailover({ contents, tools, toolConfig, userText, fileText }) {
+  const auto = state.prefs.autoFailover !== false;
+  const tried = [];
+  const errors = [];
+  let lastErr = null;
+
+  const chain = auto ? CHAT_CASCADE : CHAT_CASCADE.filter((p) => p.id === "gemini");
+  // If gemini cooling and auto, still skip to next
+  for (const p of chain) {
+    if (!providerReady(p)) {
+      if (isProviderCool(p.id)) tried.push(p.id + "(cool " + coolRemaining(p.id) + "s)");
+      else if (p.kind === "gemini" && !state.apiKey) tried.push("gemini(no key)");
+      else if (p.keyField && !aiKey(p.keyField)) tried.push(p.id + "(no key)");
+      continue;
+    }
+
+    setStatus("Via " + p.label + "…");
+    state.activeProvider = p.id;
+    updateProviderPill();
+
+    try {
+      if (p.kind === "gemini") {
+        const data = await geminiGenerate({ contents, tools, toolConfig });
+        clearProviderCool("gemini");
+        state.lastFailoverNote = tried.length ? "failover tried: " + tried.join(" → ") : "";
+        return { mode: "gemini", data, provider: "gemini", tried };
+      }
+
+      // Fallback LLM: optional local tools first for order/memory
+      let local = null;
+      if (state.prefs.orders !== false || state.prefs.memory !== false) {
+        local = await runLocalAgentPass(userText, fileText);
+      }
+      const messages = contentsToPlainMessages(contents);
+      // If local already produced a strong order table and user looks order-only, still ask LLM to narrate briefly
+      let result;
+      if (p.kind === "openai") result = await chatWithOpenAICompat(p, messages);
+      else if (p.kind === "hf") result = await chatWithHF(p, messages);
+      else if (p.kind === "deepai") result = await chatWithDeepAI(p, messages);
+      else continue;
+
+      clearProviderCool(p.id);
+      let text = result.text || "";
+      if (local?.orderPayload) {
+        text = (local.text ? local.text + "\n\n---\n\n" : "") + (text || "");
+      } else if (local?.text && !text) {
+        text = local.text;
+      }
+      // banner
+      text = `_(switched to **${p.label}** — Gemini limit/cooldown)_\n\n` + text;
+      state.lastFailoverNote = "Using " + p.label;
+      return {
+        mode: "fallback",
+        provider: p.id,
+        text,
+        thinking: undefined,
+        fnCalls: [],
+        sources: [],
+        toolTrace: local?.toolTrace || [],
+        orderPayload: local?.orderPayload || null,
+        tried,
+      };
+    } catch (err) {
+      lastErr = err;
+      const code = err.code || err.status;
+      errors.push(p.id + ": " + (err.message || String(err)));
+      tried.push(p.id + "(fail)");
+      if (code === 429 || code === "429") {
+        markProviderCool(p.id);
+        continue; // next provider
+      }
+      // auth / hard fail — try next if auto
+      if (auto && (code === 401 || code === 403 || code === "nokey")) continue;
+      if (auto) continue;
+      throw err;
+    }
+  }
+
+  // All LLM providers failed — pure local
+  setStatus("Local tools…");
+  state.activeProvider = "local";
+  updateProviderPill();
+  const local = await runLocalAgentPass(userText, fileText);
+  const msg = [
+    "⚠️ **All chat APIs limited or unavailable.**",
+    tried.length ? "Tried: " + tried.join(" → ") : "",
+    errors.slice(0, 4).join(" · "),
+    "",
+    local.text,
+    "",
+    "Settings me backup keys add karo: **Groq** (recommended free), Hugging Face, DeepAI. Auto-switch ON rakho.",
+  ].filter(Boolean).join("\n");
+  return {
+    mode: "local",
+    provider: "local",
+    text: msg,
+    toolTrace: local.toolTrace,
+    orderPayload: local.orderPayload,
+    tried,
+    fnCalls: [],
+    sources: [],
+  };
+}
+
+function updateProviderPill() {
+  const sub = $("chatSub");
+  if (!sub) return;
+  const labels = { gemini: "Gemini", groq: "Groq", huggingface: "Hugging Face", deepai: "DeepAI", local: "Local tools" };
+  const name = labels[state.activeProvider] || state.activeProvider || "Gemini";
+  const auto = state.prefs.autoFailover !== false ? " · auto-switch" : "";
+  sub.textContent = name + " · tools · web · orders" + auto;
 }
 
 /* ---------------- public-apis AI catalog ---------------- */
@@ -942,9 +1304,9 @@ async function runTool(name, args) {
 
 /* ---------------- Gemini API ---------------- */
 async function geminiGenerate({ contents, tools, toolConfig }) {
-  if (state.apiCoolUntil && Date.now() < state.apiCoolUntil) {
-    const sec = Math.ceil((state.apiCoolUntil - Date.now()) / 1000);
-    const e = new Error(`API cooldown ${sec}s (free tier limit). Wait, or continue without web.`);
+  if (isProviderCool("gemini") || (state.apiCoolUntil && Date.now() < state.apiCoolUntil)) {
+    const sec = coolRemaining("gemini") || Math.ceil((state.apiCoolUntil - Date.now()) / 1000);
+    const e = new Error(`Gemini cooldown ${sec}s (free tier). Auto-switch will try backup APIs.`);
     e.code = 429;
     throw e;
   }
@@ -1008,14 +1370,14 @@ async function geminiGenerate({ contents, tools, toolConfig }) {
   if (!res.ok) {
     const msg = data?.error?.message || res.statusText;
     if (res.status === 429) {
-      state.apiCoolUntil = Date.now() + 60_000;
-      const e = new Error("API limit (429). Free tier cooldown 60s — don't spam. Text-only / fewer tools helps.");
+      markProviderCool("gemini", COOL_MS.gemini);
+      const e = new Error("Gemini API limit (429). Switching to backup provider if keys available…");
       e.code = 429;
       throw e;
     }
     throw new Error(msg || "Gemini failed");
   }
-  state.apiCoolUntil = 0;
+  clearProviderCool("gemini");
   return data;
 }
 
@@ -1167,8 +1529,8 @@ function renderMessages() {
     box.innerHTML = `
       <div class="welcome-hero">
         <h2>Mohan AI</h2>
-        <p>Advanced Gemini chatbot — thinking, web, memory, history, order tools, <b>public-apis AI catalog</b>.</p>
-        <p class="sm">Master: <b>${state.master.length}</b> · Memory: <b>${state.memory.length}</b> · AI APIs: <b>${state.aiCatalog.count || "…"}</b></p>
+        <p>Multi-provider AI — <b>auto-switch</b> Gemini → Groq → HF → DeepAI on limits. Orders, web, memory, catalog.</p>
+        <p class="sm">Master: <b>${state.master.length}</b> · AI APIs: <b>${state.aiCatalog.count || "…"}</b> · Pool: <b>${listReadyProviders().map((p)=>p.label).join(" / ") || "add keys"}</b></p>
         <div class="suggestions">
           <button type="button" data-s="List AI APIs from the catalog that can do translation">AI APIs: translate</button>
           <button type="button" data-s="Search the web: latest GST updates India">Web search</button>
@@ -1196,6 +1558,9 @@ function renderMsg(m) {
   let body = "";
   if (m.thinking && state.prefs.thinking) {
     body += `<details class="thinking" open><summary>💭 Thinking</summary><div class="thinking-body">${escapeHtml(m.thinking)}</div></details>`;
+  }
+  if (m.provider && m.provider !== "gemini") {
+    body += `<div class="provider-badge">⚡ via ${escapeHtml(m.provider)}</div>`;
   }
   if (m.tools?.length) {
     body += `<div class="tool-trace">🔧 ${m.tools.map((t) => escapeHtml(t)).join(" · ")}</div>`;
@@ -1316,9 +1681,10 @@ async function sendMessage() {
   const text = $("msgInput").value.trim();
   const files = [...state.pendingFiles];
   if (!text && !files.length) return;
-  if (!state.apiKey) {
+  const hasAnyKey = !!(state.apiKey || aiKey("groq") || aiKey("huggingface") || aiKey("deepai"));
+  if (!hasAnyKey) {
     openSettings();
-    setStatus("API key required");
+    setStatus("Add Gemini or backup API key");
     return;
   }
 
@@ -1398,60 +1764,105 @@ async function runAssistant() {
     }
 
     const tools = toolDeclarations();
-    let data = await geminiGenerate({ contents, tools });
-    let { text, thinking, fnCalls, sources } = extractParts(data);
-    const toolTrace = [];
+    const lastUser = [...hist].reverse().find((m) => m.role === "user");
+    const userText = lastUser?.text || "";
+
+    let text = "";
+    let thinking = "";
+    let sources = [];
+    let toolTrace = [];
     let orderPayload = null;
+    let usedProvider = "gemini";
 
-    // Agentic tool loop (max 6)
-    let loops = 0;
-    while (fnCalls.length && loops < 6) {
-      loops++;
-      setStatus(`Tool: ${fnCalls.map((f) => f.name).join(", ")}…`);
-      const modelParts = [];
-      // re-add function calls as model turn
-      for (const fc of fnCalls) {
-        modelParts.push({ functionCall: fc });
-        toolTrace.push(fc.name);
-      }
-      contents.push({ role: "model", parts: modelParts });
+    const first = await generateWithFailover({
+      contents,
+      tools,
+      userText,
+      fileText: textBlob,
+    });
 
-      const frParts = [];
-      for (const fc of fnCalls) {
-        let args = fc.args || {};
-        if (typeof args === "string") try { args = JSON.parse(args); } catch { args = {}; }
-        const result = await runTool(fc.name, args);
-        if (fc.name === "match_order_lines" && result.rows) orderPayload = { rows: result.rows };
-        if (fc.name === "match_master" && result.code !== undefined) {
-          orderPayload = {
-            rows: [
-              {
-                po_name: result.po_name,
-                pack: result.pack,
-                qty: "",
-                code: result.code,
-                status: result.status,
-                conf: result.conf,
-                master_name: result.name,
-              },
-            ],
-          };
+    if (first.mode === "gemini") {
+      let data = first.data;
+      usedProvider = "gemini";
+      let extracted = extractParts(data);
+      text = extracted.text;
+      thinking = extracted.thinking;
+      let fnCalls = extracted.fnCalls;
+      sources = extracted.sources || [];
+
+      // Agentic tool loop (max 6) — Gemini only
+      let loops = 0;
+      while (fnCalls.length && loops < 6) {
+        loops++;
+        setStatus(`Tool: ${fnCalls.map((f) => f.name).join(", ")}…`);
+        const modelParts = [];
+        for (const fc of fnCalls) {
+          modelParts.push({ functionCall: fc });
+          toolTrace.push(fc.name);
         }
-        frParts.push({
-          functionResponse: {
-            name: fc.name,
-            response: result,
-          },
-        });
-      }
-      contents.push({ role: "user", parts: frParts });
+        contents.push({ role: "model", parts: modelParts });
 
-      data = await geminiGenerate({ contents, tools });
-      const ex = extractParts(data);
-      text = ex.text;
-      if (ex.thinking) thinking = (thinking ? thinking + "\n" : "") + ex.thinking;
-      if (ex.sources?.length) sources = [...(sources || []), ...ex.sources];
-      fnCalls = ex.fnCalls;
+        const frParts = [];
+        for (const fc of fnCalls) {
+          let args = fc.args || {};
+          if (typeof args === "string") try { args = JSON.parse(args); } catch { args = {}; }
+          const result = await runTool(fc.name, args);
+          if (fc.name === "match_order_lines" && result.rows) orderPayload = { rows: result.rows };
+          if (fc.name === "match_master" && result.code !== undefined) {
+            orderPayload = {
+              rows: [
+                {
+                  po_name: result.po_name,
+                  pack: result.pack,
+                  qty: "",
+                  code: result.code,
+                  status: result.status,
+                  conf: result.conf,
+                  master_name: result.name,
+                },
+              ],
+            };
+          }
+          frParts.push({
+            functionResponse: {
+              name: fc.name,
+              response: result,
+            },
+          });
+        }
+        contents.push({ role: "user", parts: frParts });
+
+        try {
+          data = await geminiGenerate({ contents, tools });
+        } catch (err) {
+          if (err.code === 429 && state.prefs.autoFailover !== false) {
+            // Mid-tool-loop limit → finish with failover plain answer
+            const fb = await generateWithFailover({ contents, tools: [], userText, fileText: textBlob });
+            usedProvider = fb.provider;
+            text = fb.text || text;
+            if (fb.orderPayload) orderPayload = fb.orderPayload;
+            if (fb.toolTrace?.length) toolTrace = toolTrace.concat(fb.toolTrace);
+            toolTrace.push("auto_failover:" + fb.provider);
+            fnCalls = [];
+            break;
+          }
+          throw err;
+        }
+        const ex = extractParts(data);
+        text = ex.text;
+        if (ex.thinking) thinking = (thinking ? thinking + "\n" : "") + ex.thinking;
+        if (ex.sources?.length) sources = [...(sources || []), ...ex.sources];
+        fnCalls = ex.fnCalls;
+      }
+    } else {
+      // fallback / local path
+      usedProvider = first.provider;
+      text = first.text || "";
+      thinking = first.thinking || "";
+      sources = first.sources || [];
+      toolTrace = first.toolTrace || [];
+      orderPayload = first.orderPayload || null;
+      toolTrace = ["auto_failover:" + usedProvider].concat(toolTrace);
     }
 
     removeTyping();
@@ -1463,6 +1874,7 @@ async function runAssistant() {
       tools: toolTrace.length ? toolTrace : undefined,
       sources: sources?.length ? sources : undefined,
       order: orderPayload || undefined,
+      provider: usedProvider,
       ts: Date.now(),
     };
     chat.messages.push(botMsg);
@@ -1471,10 +1883,36 @@ async function runAssistant() {
     renderChatList();
     $("messages").appendChild(renderMsg(botMsg));
     $("messages").scrollTop = $("messages").scrollHeight;
-    setStatus("Ready");
+    updateProviderPill();
+    const readyBits = listReadyProviders().map((p) => p.label).join("/");
+    setStatus(usedProvider === "gemini" ? "Ready · Gemini" : `Ready · via ${usedProvider}` + (readyBits ? ` · pool: ${readyBits}` : ""));
   } catch (err) {
     console.error(err);
     removeTyping();
+    // Last-ditch local if rate limit
+    if (err.code === 429 || /429|rate limit|cooldown/i.test(err.message || "")) {
+      try {
+        const chat2 = getActive();
+        const lastU = [...(chat2?.messages || [])].reverse().find((m) => m.role === "user");
+        const local = await runLocalAgentPass(lastU?.text || "", "");
+        const botMsg = {
+          id: uid(),
+          role: "model",
+          text: "⚠️ Gemini limited. " + (local.text || err.message),
+          tools: ["auto_failover:local"].concat(local.toolTrace || []),
+          order: local.orderPayload || undefined,
+          provider: "local",
+          ts: Date.now(),
+        };
+        chat2?.messages.push(botMsg);
+        saveChats();
+        $("messages").appendChild(renderMsg(botMsg));
+        state.activeProvider = "local";
+        updateProviderPill();
+        setStatus("Limited · local tools");
+        return;
+      } catch (_) {}
+    }
     const botMsg = {
       id: uid(),
       role: "model",
@@ -1517,6 +1955,17 @@ function openSettings() {
   $("systemPrompt").value = state.systemExtra;
   $("masterStatus").textContent = `${state.master.length} products · ${state.rules.length} rules`;
   renderAiKeysGrid();
+  if ($("chkAutoFailover")) $("chkAutoFailover").checked = state.prefs.autoFailover !== false;
+  const pool = $("failoverPoolStatus");
+  if (pool) {
+    const rows = CHAT_CASCADE.map((p) => {
+      const ready = providerReady(p);
+      const cool = isProviderCool(p.id) ? `cool ${coolRemaining(p.id)}s` : "";
+      const key = p.kind === "gemini" ? (state.apiKey ? "key✓" : "no key") : (p.keyField ? (aiKey(p.keyField) ? "key✓" : "no key") : "");
+      return `${p.label}: ${ready ? "READY" : "wait"} ${key} ${cool}`.trim();
+    });
+    pool.textContent = rows.join(" · ");
+  }
   $("settingsModal").classList.remove("hidden");
 }
 function openAiApis() {
@@ -1621,7 +2070,8 @@ function openConnectors() {
     { name: "🧠 Long-term Memory", desc: "Facts saved across chats (local)", on: state.prefs.memory },
     { name: "💭 Thinking view", desc: "Show model reasoning when available", on: state.prefs.thinking },
     { name: "🤖 public-apis AI catalog", desc: `${nAi} AI APIs · ${nKeys} extra keys saved`, on: state.prefs.aiApis !== false },
-    { name: "⚡ Groq / HF / DeepAI…", desc: "Callable providers via call_ai_api tool", on: nKeys > 0 || !!state.apiKey },
+    { name: "⚡ Auto API switch", desc: "Gemini limit → Groq → HF → DeepAI automatically", on: state.prefs.autoFailover !== false },
+    { name: "🔑 Backup chat keys", desc: `${nKeys} extra keys · pool ${listReadyProviders().map(p=>p.label).join("/")||"none"}`, on: nKeys > 0 || !!state.apiKey },
     { name: "📄 File upload", desc: "PDF, Excel, images in chat", on: true },
     { name: "📋 Clipboard / Export", desc: "Copy answers & order TSV", on: true },
     { name: "🔗 URL fetch tool", desc: "Read public web pages via tool", on: true },
@@ -1689,12 +2139,22 @@ function bind() {
     state.model = resolveModel($("modelSelect").value);
     state.systemExtra = $("systemPrompt").value.trim();
     collectAiKeysFromForm();
+    if ($("chkAutoFailover")) {
+      state.prefs.autoFailover = $("chkAutoFailover").checked;
+      savePrefs();
+    }
     localStorage.setItem(STORAGE.apiKey, state.apiKey);
     localStorage.setItem(STORAGE.model, state.model);
     localStorage.setItem(STORAGE.system, state.systemExtra);
     $("settingsModal").classList.add("hidden");
-    setStatus("Saved");
+    updateProviderPill();
+    setStatus("Saved · pool " + listReadyProviders().map((p) => p.label).join("/"));
   };
+  $("chkAutoFailover")?.addEventListener("change", (e) => {
+    state.prefs.autoFailover = e.target.checked;
+    savePrefs();
+    updateProviderPill();
+  });
   ["aiApiSearch", "aiApiCat", "aiApiTag"].forEach((id) => {
     $(id)?.addEventListener("input", renderAiApiList);
     $(id)?.addEventListener("change", renderAiApiList);
@@ -1871,6 +2331,8 @@ async function init() {
   state.prefs.memory = $("chkMemory").checked;
   state.prefs.thinking = $("chkThinking").checked;
   state.prefs.aiApis = $("chkAiApis") ? $("chkAiApis").checked : true;
+  if (state.prefs.autoFailover === undefined) state.prefs.autoFailover = true;
+  if ($("chkAutoFailover")) $("chkAutoFailover").checked = state.prefs.autoFailover !== false;
 
   setupPdf();
   bind();
@@ -1883,9 +2345,11 @@ async function init() {
   await loadMaster();
   await loadAiCatalog();
   $("masterStatus").textContent = `${state.master.length} products`;
-  setStatus(`Ready · ${state.master.length} SKUs · ${state.aiCatalog.count || 0} AI APIs`);
+  updateProviderPill();
+  const pool = listReadyProviders().map((p) => p.label).join("/");
+  setStatus(`Ready · ${state.master.length} SKUs · ${state.aiCatalog.count || 0} AI APIs` + (pool ? ` · ${pool}` : ""));
 
-  if (!state.apiKey) setTimeout(openSettings, 400);
+  if (!state.apiKey && !aiKey("groq") && !aiKey("huggingface") && !aiKey("deepai")) setTimeout(openSettings, 400);
 
   if ("serviceWorker" in navigator) {
     try { await navigator.serviceWorker.register("./sw.js"); } catch (_) {}

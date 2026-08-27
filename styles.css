@@ -391,6 +391,17 @@ button { cursor: pointer; border: none; background: none; }
 }
 .ai-key-row label { font-size: .72rem; color: var(--muted); }
 .ai-key-row input { font-size: .8rem; }
+.failover-box {
+  border: 1px solid color-mix(in srgb, var(--primary2) 35%, var(--border));
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 14px;
+  background: color-mix(in srgb, var(--primary2) 8%, var(--bg));
+}
+.failover-box .chip-toggle { width: 100%; justify-content: flex-start; }
+.provider-badge {
+  display: inline-block; font-size: .72rem; font-weight: 700;
+  color: #38bdf8; background: color-mix(in srgb, #38bdf8 14%, transparent);
+  padding: 2px 8px; border-radius: 999px; margin-bottom: 6px;
+}
 
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; }
