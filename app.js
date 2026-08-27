@@ -1,5 +1,5 @@
 /**
- * Mohan AI v13 — public-apis catalog auto-failover
+ * Mohan AI v14 — public-apis catalog auto-failover
  * Switch ONLY among APIs from github.com/public-apis/public-apis (ai_apis.json)
  * Chat history · Memory · Thinking · Web · Orders · catalog tools
  */

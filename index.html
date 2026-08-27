@@ -3,36 +3,50 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f766e" />
+  <meta name="theme-color" content="#09090b" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="description" content="Mohan AI — advanced Gemini chatbot with tools, memory, web search & order matching" />
+  <meta name="description" content="Mohan AI — sleek dark chatbot with tools, memory, web search & order matching" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='14' width='64' height='64' fill='%230f766e'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='sans-serif'%3EM%3C/text%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='12' width='64' height='64' fill='%2310b981'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='system-ui'%3EM%3C/text%3E%3C/svg%3E" />
   <title>Mohan AI</title>
-  <link rel="stylesheet" href="styles.css?v=13" />
+  <link rel="stylesheet" href="styles.css?v=14" />
 </head>
 <body>
   <div id="app" class="app">
-    <!-- Sidebar: history -->
+    <!-- Sidebar -->
     <aside id="sidebar" class="sidebar" aria-label="Chat history">
       <div class="sidebar-top">
-        <button type="button" id="btnNewChat" class="btn primary block">＋ New chat</button>
+        <button type="button" id="btnNewChat" class="btn-new-chat">＋ New chat</button>
       </div>
       <div class="sidebar-search">
         <input type="search" id="historySearch" class="input" placeholder="Search chats…" />
       </div>
       <nav id="chatList" class="chat-list" aria-label="Conversations"></nav>
       <div class="sidebar-foot">
-        <button type="button" id="btnMemory" class="btn ghost block sm">🧠 Memory</button>
-        <button type="button" id="btnAiApis" class="btn ghost block sm">🤖 AI APIs</button>
-        <button type="button" id="btnConnectors" class="btn ghost block sm">🔌 Connectors</button>
-        <button type="button" id="btnSettings" class="btn ghost block sm">⚙ Settings</button>
-        <p class="build">Mohan AI · v13</p>
+        <div class="side-nav-icons" role="toolbar" aria-label="App menu">
+          <button type="button" id="btnMemory" class="side-icon" title="Memory">
+            <span class="ic" aria-hidden="true">🧠</span>
+            <span>Memory</span>
+          </button>
+          <button type="button" id="btnAiApis" class="side-icon" title="AI APIs">
+            <span class="ic" aria-hidden="true">⚡</span>
+            <span>APIs</span>
+          </button>
+          <button type="button" id="btnConnectors" class="side-icon" title="Connectors">
+            <span class="ic" aria-hidden="true">🔌</span>
+            <span>Tools</span>
+          </button>
+          <button type="button" id="btnSettings" class="side-icon" title="Settings">
+            <span class="ic" aria-hidden="true">⚙</span>
+            <span>Settings</span>
+          </button>
+        </div>
+        <p class="build">Mohan AI · v14</p>
       </div>
     </aside>
 
-    <!-- Main chat -->
+    <!-- Main -->
     <main class="main">
       <header class="topbar">
         <button type="button" id="btnMenu" class="btn icon" aria-label="Menu">☰</button>
@@ -49,27 +63,26 @@
         </div>
       </header>
 
-      <!-- Tool chips -->
       <div class="tool-bar" id="toolBar">
         <label class="chip-toggle" title="Show model thinking">
           <input type="checkbox" id="chkThinking" />
-          <span>💭 Thinking</span>
+          <span>Thinking</span>
         </label>
         <label class="chip-toggle" title="Google Search grounding">
           <input type="checkbox" id="chkWeb" checked />
-          <span>🌐 Web</span>
+          <span>Web</span>
         </label>
         <label class="chip-toggle" title="Order / master tools">
           <input type="checkbox" id="chkOrderTools" checked />
-          <span>📦 Orders</span>
+          <span>Orders</span>
         </label>
         <label class="chip-toggle" title="Use saved memory">
           <input type="checkbox" id="chkMemory" checked />
-          <span>🧠 Memory</span>
+          <span>Memory</span>
         </label>
         <label class="chip-toggle" title="public-apis AI catalog tools">
           <input type="checkbox" id="chkAiApis" checked />
-          <span>🤖 AI APIs</span>
+          <span>AI APIs</span>
         </label>
         <span class="spacer"></span>
         <span class="pill" id="statusPill">Ready</span>
@@ -81,13 +94,13 @@
         <div id="attachPreview" class="attach-preview hidden"></div>
         <div class="composer">
           <label class="icon-btn" title="Attach files">
-            📎
+            ＋
             <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv,.txt,.doc,.docx,image/*,.json" multiple hidden />
           </label>
-          <textarea id="msgInput" rows="1" placeholder="Message Mohan AI… (orders, search, anything)" enterkeyhint="send"></textarea>
-          <button type="button" id="btnSend" class="btn primary send" aria-label="Send">➤</button>
+          <textarea id="msgInput" rows="1" placeholder="Message Mohan AI…" enterkeyhint="send"></textarea>
+          <button type="button" id="btnSend" class="send" aria-label="Send">➤</button>
         </div>
-        <p class="hint">Enter send · Shift+Enter newline · Tools: web search, master match, memory, code copy</p>
+        <p class="hint">Enter to send · Shift+Enter for newline</p>
       </div>
     </main>
   </div>
@@ -117,10 +130,10 @@
       <div class="field failover-box">
         <label class="chip-toggle">
           <input type="checkbox" id="chkAutoFailover" checked />
-          <span>⚡ Auto-switch only public-apis catalog AI APIs</span>
+          <span>Auto-switch only public-apis catalog AI APIs</span>
         </label>
         <p class="status-line" id="failoverPoolStatus">—</p>
-        <p class="fineprint">Limit pe next API <b>sirf</b> <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> list se (Gemini → Groq → HF → DeepAI → GoldBean → Wolfram). Keys neeche. Order match local bhi.</p>
+        <p class="fineprint">On limit, next API is only from <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> (Gemini → Groq → HF → DeepAI → GoldBean → Wolfram). Keys below.</p>
       </div>
       <label class="field">
         <span>System personality</span>
@@ -132,20 +145,20 @@
         <p class="status-line" id="masterStatus">—</p>
       </label>
       <div class="field">
-        <span>public-apis catalog keys <small>(auto-switch pool · device only)</small></span>
-        <p class="fineprint" style="margin:0 0 6px">Failover chain = catalog entries only. Chat: <b>Groq</b>, Hugging Face, DeepAI, GoldBean, Wolfram (+ Gemini primary).</p>
+        <span>public-apis catalog keys <small>(auto-switch pool)</small></span>
+        <p class="fineprint" style="margin:0 0 6px">Failover = catalog only. Groq recommended free backup.</p>
         <div class="ai-keys-grid" id="aiKeysGrid"></div>
-        <p class="fineprint">Keys isi browser me. Free: console.groq.com · hf.co/settings/tokens · deepai.org · wolfram</p>
+        <p class="fineprint">Keys stay on this device. Free: console.groq.com · hf.co/settings/tokens · deepai.org</p>
       </div>
       <div class="field">
         <span>Data</span>
         <div class="row wrap gap">
-          <button type="button" id="btnExportAll" class="btn sm">Export all data</button>
-          <label class="btn sm">Import data<input type="file" id="importAllInput" accept=".json" hidden /></label>
+          <button type="button" id="btnExportAll" class="btn sm">Export all</button>
+          <label class="btn sm">Import<input type="file" id="importAllInput" accept=".json" hidden /></label>
           <button type="button" id="btnClearHistory" class="btn sm danger">Clear history</button>
         </div>
       </div>
-      <p class="fineprint">API key stays in this browser. Web search uses Gemini Google Search grounding. Order codes only from master/rules.</p>
+      <p class="fineprint">API keys stay in this browser. Order codes only from master/rules.</p>
       <button type="button" id="btnSaveSettings" class="btn primary block">Save</button>
     </div>
   </div>
@@ -154,16 +167,16 @@
   <div id="memoryModal" class="modal hidden" role="dialog">
     <div class="modal-card">
       <div class="modal-head">
-        <h2>🧠 Memory</h2>
+        <h2>Memory</h2>
         <button type="button" class="btn icon" id="btnCloseMemory">✕</button>
       </div>
-      <p class="muted sm">Facts Mohan remembers across chats (local).</p>
+      <p class="muted sm">Facts remembered across chats (local).</p>
       <div id="memoryList" class="memory-list"></div>
       <div class="row gap">
-        <input type="text" id="memoryInput" class="input" placeholder="Add memory… e.g. My company is ATOR" />
+        <input type="text" id="memoryInput" class="input" placeholder="Add memory…" />
         <button type="button" id="btnAddMemory" class="btn primary sm">Add</button>
       </div>
-      <button type="button" id="btnClearMemory" class="btn danger sm" style="margin-top:10px">Clear all memory</button>
+      <button type="button" id="btnClearMemory" class="btn danger sm" style="margin-top:10px">Clear all</button>
     </div>
   </div>
 
@@ -171,24 +184,24 @@
   <div id="connectorsModal" class="modal hidden" role="dialog">
     <div class="modal-card wide">
       <div class="modal-head">
-        <h2>🔌 Connectors & tools</h2>
+        <h2>Connectors & tools</h2>
         <button type="button" class="btn icon" id="btnCloseConnectors">✕</button>
       </div>
       <div class="conn-grid" id="connGrid"></div>
-      <p class="fineprint">Built-in tools run in-browser. Google Workspace deep OAuth needs admin app; here: Web Search, Master/Orders, Clipboard, Download, URL fetch, local files, public-apis AI catalog.</p>
+      <p class="fineprint">Built-in tools run in-browser. Catalog failover uses public-apis AI entries only.</p>
     </div>
   </div>
 
-  <!-- AI APIs catalog (public-apis) -->
+  <!-- AI APIs -->
   <div id="aiApisModal" class="modal hidden" role="dialog">
     <div class="modal-card xwide">
       <div class="modal-head">
-        <h2>🤖 AI APIs</h2>
+        <h2>AI APIs</h2>
         <button type="button" class="btn icon" id="btnCloseAiApis">✕</button>
       </div>
-      <p class="muted sm">From <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> — Machine Learning + Text Analysis (+ AI-related). Browse, save keys, ask chat to call tools.</p>
+      <p class="muted sm">From <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> — Machine Learning + Text Analysis. Browse, keys, tools.</p>
       <div class="row wrap gap ai-filter-bar">
-        <input type="search" id="aiApiSearch" class="input grow" placeholder="Search APIs… e.g. translate, groq, vision" />
+        <input type="search" id="aiApiSearch" class="input grow" placeholder="Search APIs…" />
         <select id="aiApiCat" class="input" style="max-width:200px">
           <option value="">All categories</option>
         </select>
@@ -201,14 +214,13 @@
           <option value="data">Data</option>
           <option value="ai">Other AI</option>
         </select>
-        <label class="chip-toggle"><input type="checkbox" id="aiApiCallableOnly" /><span>Callable only</span></label>
+        <label class="chip-toggle"><input type="checkbox" id="aiApiCallableOnly" /><span>Callable</span></label>
       </div>
       <p class="status-line" id="aiApiCount">—</p>
       <div id="aiApiList" class="ai-api-list"></div>
     </div>
   </div>
 
-  <!-- Order result expand -->
   <div id="confirmModal" class="modal hidden" role="dialog">
     <div class="modal-card sm">
       <h2 id="confirmTitle">Confirm</h2>
@@ -225,6 +237,6 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="app.js?v=13" type="module"></script>
+  <script src="app.js?v=14" type="module"></script>
 </body>
 </html>
