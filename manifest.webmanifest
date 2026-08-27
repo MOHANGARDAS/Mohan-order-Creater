@@ -1,7 +1,7 @@
 {
   "name": "Mohan AI",
   "short_name": "Mohan AI",
-  "description": "Advanced Gemini chatbot — tools, web, memory, orders",
+  "description": "Advanced Gemini chatbot — tools, web, memory, orders, public-apis AI catalog",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0b1220",

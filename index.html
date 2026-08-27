@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='14' width='64' height='64' fill='%230f766e'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='sans-serif'%3EM%3C/text%3E%3C/svg%3E" />
   <title>Mohan AI</title>
-  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="styles.css?v=11" />
 </head>
 <body>
   <div id="app" class="app">
@@ -25,9 +25,10 @@
       <nav id="chatList" class="chat-list" aria-label="Conversations"></nav>
       <div class="sidebar-foot">
         <button type="button" id="btnMemory" class="btn ghost block sm">🧠 Memory</button>
+        <button type="button" id="btnAiApis" class="btn ghost block sm">🤖 AI APIs</button>
         <button type="button" id="btnConnectors" class="btn ghost block sm">🔌 Connectors</button>
         <button type="button" id="btnSettings" class="btn ghost block sm">⚙ Settings</button>
-        <p class="build">Mohan AI · v10</p>
+        <p class="build">Mohan AI · v11</p>
       </div>
     </aside>
 
@@ -39,7 +40,7 @@
           <span class="logo">M</span>
           <div>
             <h1 id="chatTitle">Mohan AI</h1>
-            <p class="sub" id="chatSub">Gemini · tools · web · orders</p>
+            <p class="sub" id="chatSub">Gemini · AI APIs · web · orders</p>
           </div>
         </div>
         <div class="top-actions">
@@ -65,6 +66,10 @@
         <label class="chip-toggle" title="Use saved memory">
           <input type="checkbox" id="chkMemory" checked />
           <span>🧠 Memory</span>
+        </label>
+        <label class="chip-toggle" title="public-apis AI catalog tools">
+          <input type="checkbox" id="chkAiApis" checked />
+          <span>🤖 AI APIs</span>
         </label>
         <span class="spacer"></span>
         <span class="pill" id="statusPill">Ready</span>
@@ -119,6 +124,11 @@
         <p class="status-line" id="masterStatus">—</p>
       </label>
       <div class="field">
+        <span>Extra AI provider keys <small>(optional · from public-apis)</small></span>
+        <div class="ai-keys-grid" id="aiKeysGrid"></div>
+        <p class="fineprint">Keys stay on this device only. Catalog: public-apis Machine Learning + Text Analysis. Browser CORS may block some calls.</p>
+      </div>
+      <div class="field">
         <span>Data</span>
         <div class="row wrap gap">
           <button type="button" id="btnExportAll" class="btn sm">Export all data</button>
@@ -156,7 +166,36 @@
         <button type="button" class="btn icon" id="btnCloseConnectors">✕</button>
       </div>
       <div class="conn-grid" id="connGrid"></div>
-      <p class="fineprint">Built-in tools run in-browser. Google Workspace deep OAuth needs admin app; here: Web Search, Master/Orders, Clipboard, Download, URL fetch, local files.</p>
+      <p class="fineprint">Built-in tools run in-browser. Google Workspace deep OAuth needs admin app; here: Web Search, Master/Orders, Clipboard, Download, URL fetch, local files, public-apis AI catalog.</p>
+    </div>
+  </div>
+
+  <!-- AI APIs catalog (public-apis) -->
+  <div id="aiApisModal" class="modal hidden" role="dialog">
+    <div class="modal-card xwide">
+      <div class="modal-head">
+        <h2>🤖 AI APIs</h2>
+        <button type="button" class="btn icon" id="btnCloseAiApis">✕</button>
+      </div>
+      <p class="muted sm">From <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> — Machine Learning + Text Analysis (+ AI-related). Browse, save keys, ask chat to call tools.</p>
+      <div class="row wrap gap ai-filter-bar">
+        <input type="search" id="aiApiSearch" class="input grow" placeholder="Search APIs… e.g. translate, groq, vision" />
+        <select id="aiApiCat" class="input" style="max-width:200px">
+          <option value="">All categories</option>
+        </select>
+        <select id="aiApiTag" class="input" style="max-width:140px">
+          <option value="">All tags</option>
+          <option value="llm">LLM</option>
+          <option value="vision">Vision</option>
+          <option value="audio">Audio</option>
+          <option value="nlp">NLP</option>
+          <option value="data">Data</option>
+          <option value="ai">Other AI</option>
+        </select>
+        <label class="chip-toggle"><input type="checkbox" id="aiApiCallableOnly" /><span>Callable only</span></label>
+      </div>
+      <p class="status-line" id="aiApiCount">—</p>
+      <div id="aiApiList" class="ai-api-list"></div>
     </div>
   </div>
 
@@ -177,6 +216,6 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="app.js?v=10" type="module"></script>
+  <script src="app.js?v=11" type="module"></script>
 </body>
 </html>

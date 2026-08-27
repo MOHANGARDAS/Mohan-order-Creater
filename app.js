@@ -1,7 +1,7 @@
 /**
- * Mohan AI v10 — Advanced Gemini chatbot
+ * Mohan AI v11 — Advanced Gemini chatbot
  * Chat history · Memory · Thinking · Web search grounding · Function tools
- * Order matching · Connectors · Markdown · Offline shell
+ * Order matching · Connectors · public-apis AI catalog · Markdown · Offline shell
  */
 
 const STORAGE = {
@@ -13,8 +13,28 @@ const STORAGE = {
   memory: "moc_memory_v10",
   master: "moc_master_v1",
   rules: "moc_rules_v1",
-  prefs: "moc_prefs_v10",
+  prefs: "moc_prefs_v11",
+  aiKeys: "moc_ai_keys_v11",
 };
+
+const AI_KEY_FIELDS = [
+  { id: "groq", label: "Groq", hint: "console.groq.com" },
+  { id: "huggingface", label: "Hugging Face", hint: "hf.co/settings/tokens" },
+  { id: "deepai", label: "DeepAI", hint: "deepai.org" },
+  { id: "jina", label: "Jina AI", hint: "jina.ai" },
+  { id: "wolfram", label: "Wolfram|Alpha", hint: "products.wolframalpha.com/api" },
+  { id: "detectlanguage", label: "Detect Language", hint: "detectlanguage.com" },
+  { id: "perspective", label: "Perspective API", hint: "perspectiveapi.com" },
+  { id: "nlpcloud", label: "NLP Cloud", hint: "nlpcloud.io" },
+  { id: "cloudmersive", label: "Cloudmersive", hint: "cloudmersive.com" },
+  { id: "goldbean", label: "GoldBean", hint: "goldbean-api.xyz" },
+  { id: "hirak", label: "Hirak (OCR/Translate)", hint: "hirak.site" },
+  { id: "kiprio", label: "Kiprio Translate", hint: "kiprio.com" },
+  { id: "roboflow", label: "Roboflow", hint: "roboflow.com" },
+  { id: "imagga", label: "Imagga", hint: "imagga.com" },
+  { id: "clarifai", label: "Clarifai", hint: "clarifai.com" },
+  { id: "audexum", label: "Audexum TTS", hint: "audexum.com" },
+];
 
 const DEPRECATED = {
   "gemini-2.0-flash": "gemini-3.6-flash",
@@ -50,6 +70,11 @@ Personality: clear, capable, concise Hinglish/English OK. Use markdown.
 When answering general knowledge / current events: use google search tool when enabled.
 When user sends PO/order/PDF/product lists: use order tools (parse + match_master). NEVER invent material codes — only from tool results / master.
 
+AI APIs catalog (from github.com/public-apis/public-apis Machine Learning + Text Analysis) is available:
+- list_ai_apis / get_ai_api — browse catalog
+- call_ai_api — invoke callable providers (Groq, HF, DeepAI, Jina, LibreTranslate, Wolfram, etc.) when user asks and keys exist
+- Prefer Gemini for main chat; use other AI APIs when user wants that provider, translation, toxicity, embeddings meta, etc.
+
 You have function tools. Call them when needed. After tools run you get results — then give the final answer.
 
 For orders, final answer should include a clean markdown table:
@@ -75,10 +100,12 @@ const state = {
   model: resolveModel(localStorage.getItem(STORAGE.model)),
   theme: localStorage.getItem(STORAGE.theme) || "dark",
   systemExtra: localStorage.getItem(STORAGE.system) || "",
-  prefs: loadJSON(STORAGE.prefs, { thinking: false, web: true, orders: true, memory: true }),
+  prefs: loadJSON(STORAGE.prefs, { thinking: false, web: true, orders: true, memory: true, aiApis: true }),
   chats: loadJSON(STORAGE.chats, []),
   memory: loadJSON(STORAGE.memory, []),
   rules: loadJSON(STORAGE.rules, []),
+  aiKeys: loadJSON(STORAGE.aiKeys, {}),
+  aiCatalog: { apis: [], count: 0, source: "", loaded: false },
   master: [],
   brandIndex: new Map(),
   activeId: null,
@@ -300,6 +327,319 @@ function saveMemory() {
 function savePrefs() {
   localStorage.setItem(STORAGE.prefs, JSON.stringify(state.prefs));
 }
+function saveAiKeys() {
+  localStorage.setItem(STORAGE.aiKeys, JSON.stringify(state.aiKeys || {}));
+}
+function aiKey(field) {
+  if (!field) return "";
+  return String(state.aiKeys?.[field] || "").trim();
+}
+
+/* ---------------- public-apis AI catalog ---------------- */
+async function loadAiCatalog() {
+  if (state.aiCatalog.loaded && state.aiCatalog.apis.length) return state.aiCatalog;
+  try {
+    const res = await fetch("./ai_apis.json", { cache: "no-cache" });
+    if (!res.ok) throw new Error("ai_apis.json " + res.status);
+    const data = await res.json();
+    state.aiCatalog = {
+      apis: data.apis || [],
+      count: data.count || (data.apis || []).length,
+      source: data.source || "https://github.com/public-apis/public-apis",
+      loaded: true,
+    };
+  } catch (e) {
+    console.warn("AI catalog load failed", e);
+    state.aiCatalog = { apis: [], count: 0, source: "", loaded: true, error: e.message };
+  }
+  return state.aiCatalog;
+}
+function findAiApi(idOrName) {
+  const q = normalize(idOrName || "");
+  if (!q) return null;
+  const apis = state.aiCatalog.apis || [];
+  return (
+    apis.find((a) => a.id === idOrName) ||
+    apis.find((a) => normalize(a.id) === q) ||
+    apis.find((a) => normalize(a.name) === q) ||
+    apis.find((a) => normalize(a.name).includes(q) || q.includes(normalize(a.name))) ||
+    null
+  );
+}
+async function callPublicAiApi(apiId, action, payload = {}) {
+  await loadAiCatalog();
+  const api = findAiApi(apiId);
+  if (!api) return { error: "Unknown API id/name. Use list_ai_apis first.", hint: apiId };
+  if (!api.callable) {
+    return {
+      error: "This API is catalog-only in-browser (OAuth/CORS/paid). Open docs and use externally.",
+      name: api.name,
+      url: api.url,
+      auth: api.auth,
+    };
+  }
+  const text = String(payload.text || payload.prompt || payload.query || "").trim();
+  const kind = api.kind || action || "catalog";
+  const act = (action || kind || "").toLowerCase();
+
+  try {
+    // Groq chat completions
+    if (api.id === "groq" || act === "chat" && api.id === "groq") {
+      const key = aiKey("groq");
+      if (!key) return { error: "Add Groq API key in Settings → Extra AI keys", docs: api.url };
+      const model = payload.model || "llama-3.1-8b-instant";
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: text || "Hello" }],
+          temperature: 0.7,
+          max_tokens: 1024,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.error?.message || res.statusText, status: res.status };
+      return { provider: "groq", model, text: data.choices?.[0]?.message?.content || "", usage: data.usage };
+    }
+
+    // Hugging Face router / inference
+    if (api.id === "hugging-face") {
+      const key = aiKey("huggingface");
+      if (!key) return { error: "Add Hugging Face token in Settings", docs: api.url };
+      const model = payload.model || "HuggingFaceH4/zephyr-7b-beta";
+      const res = await fetch(`https://api-inference.huggingface.co/models/${encodeURIComponent(model)}`, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs: text || "Hello", parameters: { max_new_tokens: 256 } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.error || res.statusText, status: res.status, raw: data };
+      const out = Array.isArray(data) ? data[0]?.generated_text || JSON.stringify(data) : data.generated_text || JSON.stringify(data);
+      return { provider: "huggingface", model, text: out };
+    }
+
+    // DeepAI text generation
+    if (api.id === "deepai") {
+      const key = aiKey("deepai");
+      if (!key) return { error: "Add DeepAI key in Settings", docs: api.url };
+      const body = new FormData();
+      body.append("text", text || "Hello");
+      const res = await fetch("https://api.deepai.org/api/text-generator", {
+        method: "POST",
+        headers: { "api-key": key },
+        body,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.err || data?.error || res.statusText, status: res.status };
+      return { provider: "deepai", text: data.output || data };
+    }
+
+    // Jina Reader
+    if (api.id === "jina-ai") {
+      const key = aiKey("jina");
+      const target = payload.url || text;
+      if (!target) return { error: "Provide url or text for Jina" };
+      if (/^https?:\/\//i.test(target)) {
+        const headers = { Accept: "application/json" };
+        if (key) headers.Authorization = "Bearer " + key;
+        const res = await fetch("https://r.jina.ai/" + target, { headers });
+        const t = await res.text();
+        if (!res.ok) return { error: t.slice(0, 500), status: res.status };
+        return { provider: "jina", kind: "reader", content: truncate(t, 12000) };
+      }
+      // embeddings if key
+      if (!key) return { error: "Jina key needed for embeddings; or pass a URL for reader", docs: api.url };
+      const res = await fetch("https://api.jina.ai/v1/embeddings", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: payload.model || "jina-embeddings-v3", input: [target] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.error || res.statusText, status: res.status };
+      const emb = data.data?.[0]?.embedding;
+      return { provider: "jina", kind: "embeddings", dims: emb?.length, sample: emb?.slice?.(0, 8) };
+    }
+
+    // LibreTranslate (no key)
+    if (api.id === "libretranslate") {
+      const res = await fetch("https://libretranslate.com/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          q: text || "Hello",
+          source: payload.source || "auto",
+          target: payload.target || payload.to || "en",
+          format: "text",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.error || res.statusText, status: res.status, note: "Public instance may rate-limit or block CORS" };
+      return { provider: "libretranslate", translated: data.translatedText, raw: data };
+    }
+
+    // Detect Language
+    if (api.id === "detect-language") {
+      const key = aiKey("detectlanguage");
+      if (!key) return { error: "Add Detect Language key", docs: api.url };
+      const res = await fetch("https://ws.detectlanguage.com/0.2/detect", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+        body: JSON.stringify({ q: text || "hello" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.error || res.statusText, status: res.status };
+      return { provider: "detectlanguage", data };
+    }
+
+    // Wolfram short answers
+    if (api.id === "wolframalpha") {
+      const key = aiKey("wolfram");
+      if (!key) return { error: "Add Wolfram AppID in Settings", docs: api.url };
+      const q = encodeURIComponent(text || "pi");
+      const res = await fetch(`https://api.wolframalpha.com/v1/result?i=${q}&appid=${encodeURIComponent(key)}`);
+      const t = await res.text();
+      if (!res.ok) return { error: t || res.statusText, status: res.status };
+      return { provider: "wolfram", answer: t };
+    }
+
+    // Perspective toxicity
+    if (api.id === "perspective") {
+      const key = aiKey("perspective");
+      if (!key) return { error: "Add Perspective API key", docs: api.url };
+      const res = await fetch(
+        `https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze?key=${encodeURIComponent(key)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            comment: { text: text || "test" },
+            languages: ["en"],
+            requestedAttributes: { TOXICITY: {}, INSULT: {}, THREAT: {} },
+          }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.error?.message || res.statusText, status: res.status };
+      const scores = {};
+      for (const [k, v] of Object.entries(data.attributeScores || {})) scores[k] = v.summaryScore?.value;
+      return { provider: "perspective", scores };
+    }
+
+    // NLP Cloud sentiment
+    if (api.id === "nlp-cloud") {
+      const key = aiKey("nlpcloud");
+      if (!key) return { error: "Add NLP Cloud key", docs: api.url };
+      const res = await fetch("https://api.nlpcloud.io/v1/en/distilbert-base-uncased-finetuned-sst-2-english/sentiment", {
+        method: "POST",
+        headers: { Authorization: "Token " + key, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text || "I love this" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.detail || data?.error || res.statusText, status: res.status };
+      return { provider: "nlpcloud", data };
+    }
+
+    // Cloudmersive image/nlp — nlp language detect as text demo
+    if (api.id === "cloudmersive") {
+      const key = aiKey("cloudmersive");
+      if (!key) return { error: "Add Cloudmersive key", docs: api.url };
+      const res = await fetch("https://api.cloudmersive.com/nlp-v2/language/detect", {
+        method: "POST",
+        headers: { Apikey: key, "Content-Type": "application/json" },
+        body: JSON.stringify({ TextToDetect: text || "hello world" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.Message || res.statusText, status: res.status };
+      return { provider: "cloudmersive", data };
+    }
+
+    // Hirak translation
+    if (api.id === "hirak-translation") {
+      const key = aiKey("hirak");
+      const q = encodeURIComponent(text || "hello");
+      const to = encodeURIComponent(payload.target || "hi");
+      const url = `https://translate.hirak.site/translate?text=${q}&to=${to}` + (key ? `&key=${encodeURIComponent(key)}` : "");
+      const res = await fetch(url);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.message || res.statusText, status: res.status };
+      return { provider: "hirak-translate", data };
+    }
+
+    // Kiprio translate
+    if (api.id === "kiprio-translate") {
+      const key = aiKey("kiprio");
+      if (!key) return { error: "Add Kiprio key", docs: api.url };
+      const res = await fetch("https://kiprio.com/v1/translate", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text || "hello", target: payload.target || "hi" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.error || res.statusText, status: res.status };
+      return { provider: "kiprio", data };
+    }
+
+    // GoldBean
+    if (api.id === "goldbean") {
+      const key = aiKey("goldbean");
+      if (!key) return { error: "Add GoldBean key", docs: api.url };
+      const res = await fetch("https://goldbean-api.xyz/v1/chat", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text || "hi" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: data?.error || res.statusText, status: res.status, note: "Endpoint shape may vary — see docs" };
+      return { provider: "goldbean", data };
+    }
+
+    // Free meta / no-key endpoints
+    if (api.id === "statlyte") {
+      const res = await fetch("https://statlyte.com/api");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: res.statusText, status: res.status, note: "CORS may block" };
+      return { provider: "statlyte", data: typeof data === "object" ? truncate(JSON.stringify(data), 8000) : data };
+    }
+    if (api.id === "tensorfeed") {
+      const res = await fetch("https://tensorfeed.ai/developers");
+      const t = await res.text();
+      return { provider: "tensorfeed", note: "Docs page", content: truncate(t.replace(/<[^>]+>/g, " "), 4000), url: api.url };
+    }
+    if (api.id === "ai-economics-tools") {
+      const res = await fetch("https://piszczek.pl/tools/api");
+      const data = await res.json().catch(async () => ({ text: await res.text() }));
+      return { provider: "ai-economics", data: truncate(JSON.stringify(data), 6000), url: api.url };
+    }
+    if (api.id === "not-human-search") {
+      const q = encodeURIComponent(text || "llm");
+      const res = await fetch(`https://nothumansearch.ai/openapi.yaml`);
+      const t = await res.text();
+      return { provider: "nothumansearch", openapi_preview: truncate(t, 4000), query: text, url: api.url };
+    }
+    if (api.id === "dreamthreads") {
+      const res = await fetch("https://mydreamthreads.xyz/dream-interpretation-api");
+      const t = await res.text();
+      return { provider: "dreamthreads", content: truncate(t.replace(/<[^>]+>/g, " "), 4000), url: api.url, note: "See docs for POST schema" };
+    }
+    if (api.id === "openvisionapi") {
+      return { provider: "openvisionapi", url: api.url, note: "Requires image upload — use docs; browser CORS limited" };
+    }
+    if (api.id === "google-gemini") {
+      return { provider: "gemini", note: "Primary chat already uses Gemini key in Settings", model: state.model };
+    }
+
+    return {
+      error: "No in-browser handler for this API yet",
+      name: api.name,
+      url: api.url,
+      kind: api.kind,
+      auth: api.auth,
+    };
+  } catch (e) {
+    return { error: e.message || String(e), note: "Often CORS or network — try docs / server proxy" };
+  }
+}
 function getActive() {
   return state.chats.find((c) => c.id === state.activeId) || null;
 }
@@ -421,6 +761,53 @@ function toolDeclarations() {
     }
   );
 
+  if (state.prefs.aiApis !== false) {
+    fns.push(
+      {
+        name: "list_ai_apis",
+        description:
+          "List AI APIs from the public-apis catalog (Machine Learning + Text Analysis). Filter by query/tag/category/callable.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Search name/description" },
+            tag: { type: "STRING", description: "llm|vision|audio|nlp|data|ai" },
+            category: { type: "STRING" },
+            callable_only: { type: "BOOLEAN" },
+            limit: { type: "NUMBER" },
+          },
+        },
+      },
+      {
+        name: "get_ai_api",
+        description: "Get details for one AI API by id or name from the catalog",
+        parameters: {
+          type: "OBJECT",
+          properties: { id_or_name: { type: "STRING" } },
+          required: ["id_or_name"],
+        },
+      },
+      {
+        name: "call_ai_api",
+        description:
+          "Call a callable AI provider from the catalog (Groq, HuggingFace, DeepAI, Jina, LibreTranslate, Wolfram, Perspective, etc.). Requires user key in Settings when auth needed.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            api_id: { type: "STRING", description: "Catalog id e.g. groq, libretranslate, jina-ai" },
+            action: { type: "STRING", description: "Optional action hint: chat, translate, embed, detect" },
+            text: { type: "STRING" },
+            url: { type: "STRING" },
+            target: { type: "STRING", description: "Target language code for translate" },
+            source: { type: "STRING" },
+            model: { type: "STRING" },
+          },
+          required: ["api_id"],
+        },
+      }
+    );
+  }
+
   if (fns.length) tools.push({ functionDeclarations: fns });
   if (state.prefs.web) tools.push({ googleSearch: {} });
   return tools;
@@ -503,6 +890,50 @@ async function runTool(name, args) {
         local: d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
         timezone: "Asia/Kolkata",
       };
+    }
+    case "list_ai_apis": {
+      await loadAiCatalog();
+      const q = normalize(args.query || "");
+      const tag = normalize(args.tag || "");
+      const cat = normalize(args.category || "");
+      const only = !!args.callable_only;
+      const limit = Math.min(Number(args.limit) || 25, 62);
+      let list = state.aiCatalog.apis || [];
+      if (q) list = list.filter((a) => normalize(a.name + " " + a.description + " " + a.id).includes(q));
+      if (tag) list = list.filter((a) => (a.tags || []).map(normalize).includes(tag));
+      if (cat) list = list.filter((a) => normalize(a.category).includes(cat));
+      if (only) list = list.filter((a) => a.callable);
+      return {
+        source: state.aiCatalog.source,
+        total: state.aiCatalog.count,
+        matched: list.length,
+        apis: list.slice(0, limit).map((a) => ({
+          id: a.id,
+          name: a.name,
+          category: a.category,
+          auth: a.auth,
+          tags: a.tags,
+          callable: !!a.callable,
+          keyField: a.keyField || null,
+          url: a.url,
+          description: a.description,
+        })),
+      };
+    }
+    case "get_ai_api": {
+      await loadAiCatalog();
+      const a = findAiApi(args.id_or_name || args.id || args.name);
+      if (!a) return { error: "Not found", query: args.id_or_name };
+      return { ...a, has_key: a.keyField ? !!aiKey(a.keyField) : null };
+    }
+    case "call_ai_api": {
+      return await callPublicAiApi(args.api_id || args.id || args.name, args.action, {
+        text: args.text || args.prompt || args.query,
+        url: args.url,
+        target: args.target || args.to,
+        source: args.source,
+        model: args.model,
+      });
     }
     default:
       return { error: "Unknown tool " + name };
@@ -736,10 +1167,10 @@ function renderMessages() {
     box.innerHTML = `
       <div class="welcome-hero">
         <h2>Mohan AI</h2>
-        <p>Advanced Gemini chatbot — thinking, web search, memory, history, order tools & connectors.</p>
-        <p class="sm">Master: <b>${state.master.length}</b> · Memory: <b>${state.memory.length}</b> · Rules: <b>${state.rules.length}</b></p>
+        <p>Advanced Gemini chatbot — thinking, web, memory, history, order tools, <b>public-apis AI catalog</b>.</p>
+        <p class="sm">Master: <b>${state.master.length}</b> · Memory: <b>${state.memory.length}</b> · AI APIs: <b>${state.aiCatalog.count || "…"}</b></p>
         <div class="suggestions">
-          <button type="button" data-s="Explain quantum computing simply">Explain something</button>
+          <button type="button" data-s="List AI APIs from the catalog that can do translation">AI APIs: translate</button>
           <button type="button" data-s="Search the web: latest GST updates India">Web search</button>
           <button type="button" data-s="Match this order line: CHANDRIKA SOAP 75GM qty 192">Match order</button>
           <button type="button" data-s="Remember that my preferred output is Code | Qty | PO Name">Save memory</button>
@@ -1061,12 +1492,103 @@ async function runAssistant() {
 }
 
 /* ---------------- modals ---------------- */
+function renderAiKeysGrid() {
+  const grid = $("aiKeysGrid");
+  if (!grid) return;
+  grid.innerHTML = AI_KEY_FIELDS.map((f) => {
+    const val = escapeHtml(state.aiKeys?.[f.id] || "");
+    return `<div class="ai-key-row">
+      <label for="aik_${f.id}">${escapeHtml(f.label)} <small>(${escapeHtml(f.hint)})</small></label>
+      <input type="password" class="input" id="aik_${f.id}" data-aik="${f.id}" value="${val}" placeholder="optional key" autocomplete="off" />
+    </div>`;
+  }).join("");
+}
+function collectAiKeysFromForm() {
+  const out = { ...state.aiKeys };
+  document.querySelectorAll("[data-aik]").forEach((inp) => {
+    out[inp.dataset.aik] = inp.value.trim();
+  });
+  state.aiKeys = out;
+  saveAiKeys();
+}
 function openSettings() {
   $("apiKeyInput").value = state.apiKey;
   $("modelSelect").value = state.model;
   $("systemPrompt").value = state.systemExtra;
   $("masterStatus").textContent = `${state.master.length} products · ${state.rules.length} rules`;
+  renderAiKeysGrid();
   $("settingsModal").classList.remove("hidden");
+}
+function openAiApis() {
+  loadAiCatalog().then(() => {
+    const cats = [...new Set((state.aiCatalog.apis || []).map((a) => a.category))].sort();
+    const sel = $("aiApiCat");
+    if (sel && sel.options.length <= 1) {
+      cats.forEach((c) => {
+        const o = document.createElement("option");
+        o.value = c;
+        o.textContent = c;
+        sel.appendChild(o);
+      });
+    }
+    renderAiApiList();
+    $("aiApisModal").classList.remove("hidden");
+  });
+}
+function renderAiApiList() {
+  const q = normalize($("aiApiSearch")?.value || "");
+  const cat = $("aiApiCat")?.value || "";
+  const tag = $("aiApiTag")?.value || "";
+  const only = !!$("aiApiCallableOnly")?.checked;
+  let list = state.aiCatalog.apis || [];
+  if (q) list = list.filter((a) => normalize(a.name + " " + a.description + " " + (a.tags || []).join(" ")).includes(q));
+  if (cat) list = list.filter((a) => a.category === cat);
+  if (tag) list = list.filter((a) => (a.tags || []).includes(tag));
+  if (only) list = list.filter((a) => a.callable);
+  $("aiApiCount").textContent = `${list.length} / ${state.aiCatalog.count || 0} APIs · source public-apis`;
+  const box = $("aiApiList");
+  box.innerHTML = list
+    .map((a) => {
+      const tags = (a.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
+      const authTag =
+        a.auth === "No"
+          ? `<span class="tag free">No auth</span>`
+          : `<span class="tag auth">${escapeHtml(a.auth)}</span>`;
+      const callTag = a.callable ? `<span class="tag call">Callable</span>` : "";
+      const hasKey = a.keyField && aiKey(a.keyField);
+      return `<div class="ai-api-card" data-id="${escapeHtml(a.id)}">
+        <h3>${escapeHtml(a.name)}</h3>
+        <p class="desc">${escapeHtml(a.description)}</p>
+        <div class="meta">${authTag}${callTag}${tags}<span class="tag">${escapeHtml(a.category)}</span></div>
+        <div class="actions">
+          <a class="btn sm ghost" href="${escapeHtml(a.url)}" target="_blank" rel="noopener">Docs</a>
+          ${
+            a.callable
+              ? `<button type="button" class="btn sm primary" data-try="${escapeHtml(a.id)}">${hasKey || a.auth === "No" ? "Try in chat" : "Add key"}</button>`
+              : `<button type="button" class="btn sm" data-try="${escapeHtml(a.id)}">Ask about</button>`
+          }
+        </div>
+      </div>`;
+    })
+    .join("");
+  box.querySelectorAll("[data-try]").forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.dataset.try;
+      const a = findAiApi(id);
+      $("aiApisModal").classList.add("hidden");
+      if (a?.callable && a.keyField && !aiKey(a.keyField) && a.auth !== "No") {
+        openSettings();
+        setStatus("Add " + (a.keyField) + " key");
+        return;
+      }
+      if (a?.callable) {
+        $("msgInput").value = `Call AI API "${a.name}" (id: ${a.id}): `;
+      } else {
+        $("msgInput").value = `Tell me about the AI API "${a?.name || id}" from the catalog and how to use it.`;
+      }
+      $("msgInput").focus();
+    };
+  });
 }
 function openMemory() {
   renderMemoryList();
@@ -1091,11 +1613,15 @@ function renderMemoryList() {
   });
 }
 function openConnectors() {
+  const nAi = state.aiCatalog.count || 0;
+  const nKeys = Object.values(state.aiKeys || {}).filter(Boolean).length;
   const items = [
     { name: "🌐 Google Web Search", desc: "Gemini Search grounding for live answers", on: state.prefs.web },
     { name: "📦 Order / Master Match", desc: "Fuzzy match PO lines to material codes", on: state.prefs.orders },
     { name: "🧠 Long-term Memory", desc: "Facts saved across chats (local)", on: state.prefs.memory },
     { name: "💭 Thinking view", desc: "Show model reasoning when available", on: state.prefs.thinking },
+    { name: "🤖 public-apis AI catalog", desc: `${nAi} AI APIs · ${nKeys} extra keys saved`, on: state.prefs.aiApis !== false },
+    { name: "⚡ Groq / HF / DeepAI…", desc: "Callable providers via call_ai_api tool", on: nKeys > 0 || !!state.apiKey },
     { name: "📄 File upload", desc: "PDF, Excel, images in chat", on: true },
     { name: "📋 Clipboard / Export", desc: "Copy answers & order TSV", on: true },
     { name: "🔗 URL fetch tool", desc: "Read public web pages via tool", on: true },
@@ -1152,20 +1678,28 @@ function bind() {
   $("btnTheme").onclick = () => applyTheme(state.theme === "dark" ? "light" : "dark");
   $("btnSettings").onclick = openSettings;
   $("btnMemory").onclick = openMemory;
+  $("btnAiApis").onclick = openAiApis;
   $("btnConnectors").onclick = openConnectors;
   $("btnCloseSettings").onclick = () => $("settingsModal").classList.add("hidden");
   $("btnCloseMemory").onclick = () => $("memoryModal").classList.add("hidden");
   $("btnCloseConnectors").onclick = () => $("connectorsModal").classList.add("hidden");
+  $("btnCloseAiApis").onclick = () => $("aiApisModal").classList.add("hidden");
   $("btnSaveSettings").onclick = () => {
     state.apiKey = $("apiKeyInput").value.trim();
     state.model = resolveModel($("modelSelect").value);
     state.systemExtra = $("systemPrompt").value.trim();
+    collectAiKeysFromForm();
     localStorage.setItem(STORAGE.apiKey, state.apiKey);
     localStorage.setItem(STORAGE.model, state.model);
     localStorage.setItem(STORAGE.system, state.systemExtra);
     $("settingsModal").classList.add("hidden");
     setStatus("Saved");
   };
+  ["aiApiSearch", "aiApiCat", "aiApiTag"].forEach((id) => {
+    $(id)?.addEventListener("input", renderAiApiList);
+    $(id)?.addEventListener("change", renderAiApiList);
+  });
+  $("aiApiCallableOnly")?.addEventListener("change", renderAiApiList);
   $("btnToggleKey").onclick = () => {
     const i = $("apiKeyInput");
     i.type = i.type === "password" ? "text" : "password";
@@ -1185,6 +1719,10 @@ function bind() {
   };
   $("chkMemory").onchange = (e) => {
     state.prefs.memory = e.target.checked;
+    savePrefs();
+  };
+  $("chkAiApis").onchange = (e) => {
+    state.prefs.aiApis = e.target.checked;
     savePrefs();
   };
   $("historySearch").oninput = renderChatList;
@@ -1230,7 +1768,9 @@ function bind() {
             memory: state.memory,
             rules: state.rules,
             prefs: state.prefs,
+            aiKeys: state.aiKeys,
             master_count: state.master.length,
+            ai_apis_count: state.aiCatalog.count,
           },
           null,
           2
@@ -1250,6 +1790,10 @@ function bind() {
       if (data.memory) state.memory = data.memory;
       if (data.rules) state.rules = data.rules;
       if (data.prefs) state.prefs = { ...state.prefs, ...data.prefs };
+      if (data.aiKeys) {
+        state.aiKeys = data.aiKeys;
+        saveAiKeys();
+      }
       saveChats();
       saveMemory();
       localStorage.setItem(STORAGE.rules, JSON.stringify(state.rules));
@@ -1321,10 +1865,12 @@ async function init() {
   $("chkWeb").checked = state.prefs.web !== false;
   $("chkOrderTools").checked = state.prefs.orders !== false;
   $("chkMemory").checked = state.prefs.memory !== false;
+  if ($("chkAiApis")) $("chkAiApis").checked = state.prefs.aiApis !== false;
   state.prefs.web = $("chkWeb").checked;
   state.prefs.orders = $("chkOrderTools").checked;
   state.prefs.memory = $("chkMemory").checked;
   state.prefs.thinking = $("chkThinking").checked;
+  state.prefs.aiApis = $("chkAiApis") ? $("chkAiApis").checked : true;
 
   setupPdf();
   bind();
@@ -1335,8 +1881,9 @@ async function init() {
   renderChatList();
   renderMessages();
   await loadMaster();
+  await loadAiCatalog();
   $("masterStatus").textContent = `${state.master.length} products`;
-  setStatus(`Ready · ${state.master.length} SKUs`);
+  setStatus(`Ready · ${state.master.length} SKUs · ${state.aiCatalog.count || 0} AI APIs`);
 
   if (!state.apiKey) setTimeout(openSettings, 400);
 

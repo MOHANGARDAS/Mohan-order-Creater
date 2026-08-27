@@ -1,5 +1,5 @@
-const CACHE = "mohan-ai-v10";
-const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./master.json", "./manifest.webmanifest"];
+const CACHE = "mohan-ai-v11";
+const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./master.json", "./ai_apis.json", "./manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();

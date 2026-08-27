@@ -1,0 +1,1080 @@
+{
+  "source": "https://github.com/public-apis/public-apis",
+  "sections": [
+    "Machine Learning",
+    "Text Analysis",
+    "AI-related extras"
+  ],
+  "updated": "2026-08-27",
+  "count": 62,
+  "apis": [
+    {
+      "id": "ai-economics-tools",
+      "name": "AI Economics Tools",
+      "url": "https://piszczek.pl/tools/api",
+      "description": "Token cost, LLM energy, agent-hour and Proof-Adjusted Autonomy calculators by Michał Piszczek",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "llm",
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "calc"
+    },
+    {
+      "id": "ai-for-thai",
+      "name": "AI For Thai",
+      "url": "https://aiforthai.in.th/index.php",
+      "description": "Free Various Thai AI API",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "brainiall",
+      "name": "BRAINIALL",
+      "url": "https://github.com/fasuizu-br/brainiall-transcription-skill",
+      "description": "PT-BR and Spanish audio transcription with diarization and SRT/VTT",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "audio"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "clarifai",
+      "name": "Clarifai",
+      "url": "https://docs.clarifai.com/api-guide/api-overview",
+      "description": "Computer Vision",
+      "auth": "OAuth",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": false,
+      "keyField": "clarifai",
+      "kind": "vision"
+    },
+    {
+      "id": "cloudmersive",
+      "name": "Cloudmersive",
+      "url": "https://www.cloudmersive.com/image-recognition-and-processing-api",
+      "description": "Image captioning, face recognition, NSFW classification",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": true,
+      "keyField": "cloudmersive",
+      "kind": "vision"
+    },
+    {
+      "id": "deepai",
+      "name": "DeepAI",
+      "url": "https://deepai.org/",
+      "description": "Provides AI-powered APIs for text generation, image processing, and more",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "llm",
+        "vision",
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "deepai",
+      "kind": "text"
+    },
+    {
+      "id": "deepcode",
+      "name": "Deepcode",
+      "url": "https://www.deepcode.ai",
+      "description": "AI for code review",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "dialogflow",
+      "name": "Dialogflow",
+      "url": "https://cloud.google.com/dialogflow/docs/",
+      "description": "Natural Language Processing",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": "dialogflow",
+      "kind": "nlp"
+    },
+    {
+      "id": "dreamthreads",
+      "name": "DreamThreads",
+      "url": "https://mydreamthreads.xyz/dream-interpretation-api",
+      "description": "Parse dreams into structured entities, emotions, agency, threat, and outcomes",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "nlp"
+    },
+    {
+      "id": "exude-api",
+      "name": "EXUDE-API",
+      "url": "http://uttesh.com/exude-api/",
+      "description": "Used for the primary ways for filtering the stopping, stemming words from the text data",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "goldbean",
+      "name": "GoldBean",
+      "url": "https://goldbean-api.xyz/docs",
+      "description": "OCR, Translation, NLP & ERNIE LLM via Baidu AI (free tier available)",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "llm",
+        "vision",
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "goldbean",
+      "kind": "llm"
+    },
+    {
+      "id": "google-gemini",
+      "name": "Google Gemini",
+      "url": "https://ai.google.dev/gemini-api/docs",
+      "description": "Multimodal generative AI for text, vision, and code generation",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "llm",
+        "vision",
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "gemini",
+      "kind": "chat"
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "url": "https://console.groq.com/docs/quickstart",
+      "description": "Fast AI inference API with free tier, supports Llama, Mixtral, Gemma models",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "llm"
+      ],
+      "callable": true,
+      "keyField": "groq",
+      "kind": "chat"
+    },
+    {
+      "id": "hirak-faceapi",
+      "name": "Hirak FaceAPI",
+      "url": "https://faceapi.hirak.site/",
+      "description": "Face detection, face recognition with age estimation/gender estimation, accurate, no quota limits",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "hugging-face",
+      "name": "Hugging Face",
+      "url": "https://huggingface.co",
+      "description": "AI model hub with inference API for NLP, computer vision, and audio",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision",
+        "audio",
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "huggingface",
+      "kind": "inference"
+    },
+    {
+      "id": "imagga",
+      "name": "Imagga",
+      "url": "https://imagga.com/",
+      "description": "Image Recognition Solutions like Tagging, Visual Search, NSFW moderation",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": false,
+      "keyField": "imagga",
+      "kind": "vision"
+    },
+    {
+      "id": "inferdo",
+      "name": "Inferdo",
+      "url": "https://rapidapi.com/user/inferdo",
+      "description": "Computer Vision services like Facial detection, Image labeling, NSFW classification",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "ips-online",
+      "name": "IPS Online",
+      "url": "https://docs.identity.ps/docs",
+      "description": "Face and License Plate Anonymization",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "irisnet",
+      "name": "Irisnet",
+      "url": "https://irisnet.de/api/",
+      "description": "Realtime content moderation API that blocks or blurs unwanted images in real-time",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "jina-ai",
+      "name": "Jina AI",
+      "url": "https://jina.ai",
+      "description": "Free AI API for embeddings, reranking, and text processing",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "jina",
+      "kind": "reader"
+    },
+    {
+      "id": "keen-io",
+      "name": "Keen IO",
+      "url": "https://keen.io/",
+      "description": "Data Analytics",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "data"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "machinetutors",
+      "name": "Machinetutors",
+      "url": "https://www.machinetutors.com/portfolio/MT_api.html",
+      "description": "AI Solutions: Video/Image Classification & Tagging, NSFW, Icon/Image/Audio Search, NLP",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision",
+        "audio",
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "mediacraft-ai",
+      "name": "MediaCraft AI",
+      "url": "https://mediacraft-x402-api.onrender.com",
+      "description": "Chinese content compliance review (17 platforms), EN↔CN translation, and SEO optimization. Pay-per-call via x402 (Solana USDC).",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "messengerx-io",
+      "name": "MessengerX.io",
+      "url": "https://messengerx.rtfd.io",
+      "description": "A FREE API for developers to build and monetize personalized ML based chat apps",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "llm"
+      ],
+      "callable": false,
+      "keyField": "messengerx",
+      "kind": "chat"
+    },
+    {
+      "id": "nlp-cloud",
+      "name": "NLP Cloud",
+      "url": "https://nlpcloud.io",
+      "description": "NLP API using spaCy and transformers for NER, sentiments, classification, summarization, and more",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "nlpcloud",
+      "kind": "nlp"
+    },
+    {
+      "id": "not-human-search",
+      "name": "Not Human Search",
+      "url": "https://nothumansearch.ai/openapi.yaml",
+      "description": "AI tool discovery with agentic scoring for 8,600+ tools and MCP servers",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "search"
+    },
+    {
+      "id": "openvisionapi",
+      "name": "OpenVisionAPI",
+      "url": "https://openvisionapi.com",
+      "description": "Open source computer vision API based on open source models",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "vision"
+    },
+    {
+      "id": "perspective",
+      "name": "Perspective",
+      "url": "https://perspectiveapi.com",
+      "description": "NLP API to return probability that if text is toxic, obscene, insulting or threatening",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "perspective",
+      "kind": "toxicity"
+    },
+    {
+      "id": "roboflow-universe",
+      "name": "Roboflow Universe",
+      "url": "https://universe.roboflow.com",
+      "description": "Pre-trained computer vision models",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": false,
+      "keyField": "roboflow",
+      "kind": "vision"
+    },
+    {
+      "id": "skybiometry",
+      "name": "SkyBiometry",
+      "url": "https://skybiometry.com/documentation/",
+      "description": "Face Detection, Face Recognition and Face Grouping",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "statlyte",
+      "name": "Statlyte",
+      "url": "https://statlyte.com/api",
+      "description": "Live pricing, context windows and model ids for major LLM APIs",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "llm",
+        "data"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "meta"
+    },
+    {
+      "id": "tensorfeed",
+      "name": "TensorFeed",
+      "url": "https://tensorfeed.ai/developers",
+      "description": "Real-time AI news, model pricing, service status, and agent activity feeds",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "data"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "news"
+    },
+    {
+      "id": "time-door",
+      "name": "Time Door",
+      "url": "https://timedoor.io",
+      "description": "A time series analysis API",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "data"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "unplugg",
+      "name": "Unplugg",
+      "url": "https://unplu.gg/test_api.html",
+      "description": "Forecasting API for timeseries data",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "data"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "wolframalpha",
+      "name": "WolframAlpha",
+      "url": "https://products.wolframalpha.com/api/",
+      "description": "Provides specific answers to questions using data and algorithms",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Machine Learning",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": "wolfram",
+      "kind": "qa"
+    },
+    {
+      "id": "code-detection",
+      "name": "Code Detection",
+      "url": "https://codedetectionapi.runtime.dev",
+      "description": "Detect, label, format and enrich the code in your app or in your data pipeline",
+      "auth": "OAuth",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "apilayer-languagelayer",
+      "name": "apilayer languagelayer",
+      "url": "https://languagelayer.com/",
+      "description": "Language Detection JSON API supporting 173 languages",
+      "auth": "OAuth",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "aylien-text-analysis",
+      "name": "Aylien Text Analysis",
+      "url": "https://docs.aylien.com/textapi/#getting-started",
+      "description": "A collection of information retrieval and natural language APIs",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "audexum",
+      "name": "Audexum",
+      "url": "https://audexum.com/docs",
+      "description": "Text-to-speech REST API with 43 voices and 33 languages",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "audio"
+      ],
+      "callable": false,
+      "keyField": "audexum",
+      "kind": "tts"
+    },
+    {
+      "id": "cloudmersive-natural-language-processing",
+      "name": "Cloudmersive Natural Language Processing",
+      "url": "https://www.cloudmersive.com/nlp-api",
+      "description": "Natural language processing and text analysis",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "detect-language",
+      "name": "Detect Language",
+      "url": "https://detectlanguage.com/",
+      "description": "Detects text language",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "detectlanguage",
+      "kind": "detect"
+    },
+    {
+      "id": "eli",
+      "name": "ELI",
+      "url": "https://nlp.insightera.co.th/docs/v1.0",
+      "description": "Natural Language Processing Tools for Thai Language",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "google-cloud-natural",
+      "name": "Google Cloud Natural",
+      "url": "https://cloud.google.com/natural-language/docs/",
+      "description": "Natural language understanding technology, including sentiment, entity and syntax analysis",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "geoscore",
+      "name": "GeoScore",
+      "url": "https://geoscoreapi.com",
+      "description": "Score content for AI search citation readiness with a 0-100 GEO score and 8 structural metrics",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "hirak-ocr",
+      "name": "Hirak OCR",
+      "url": "https://ocr.hirak.site/",
+      "description": "Image to text -text recognition- from image more than 100 language, accurate, unlimited requests",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "vision"
+      ],
+      "callable": true,
+      "keyField": "hirak",
+      "kind": "ocr"
+    },
+    {
+      "id": "hirak-translation",
+      "name": "Hirak Translation",
+      "url": "https://translate.hirak.site/",
+      "description": "Translate between 21 of most used languages, accurate, unlimited requests",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "hirak",
+      "kind": "translate"
+    },
+    {
+      "id": "kiprio-translate",
+      "name": "Kiprio Translate",
+      "url": "https://kiprio.com/v1/translate",
+      "description": "Free text translation with language detection, supports 50+ languages",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": "kiprio",
+      "kind": "translate"
+    },
+    {
+      "id": "langbly",
+      "name": "Langbly",
+      "url": "https://langbly.com/docs",
+      "description": "Context-aware text translation and language detection for 100+ languages",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "lecto-translation",
+      "name": "Lecto Translation",
+      "url": "https://rapidapi.com/lecto-lecto-default/api/lecto-translation/",
+      "description": "Translation API with free tier and reasonable prices",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "libretranslate",
+      "name": "LibreTranslate",
+      "url": "https://libretranslate.com/docs",
+      "description": "Translation tool with 17 available languages",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "translate"
+    },
+    {
+      "id": "semantria",
+      "name": "Semantria",
+      "url": "https://semantria.readme.io/docs",
+      "description": "Text Analytics with sentiment analysis, categorization & named entity extraction",
+      "auth": "OAuth",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp",
+        "data"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "sentiment-analysis",
+      "name": "Sentiment Analysis",
+      "url": "https://www.meaningcloud.com/developer/sentiment-analysis",
+      "description": "Multilingual sentiment analysis of texts from different sources",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "tisane",
+      "name": "Tisane",
+      "url": "https://tisane.ai/",
+      "description": "Text Analytics with focus on detection of abusive content and law enforcement applications",
+      "auth": "OAuth",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "data"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "watson-natural-language-understanding",
+      "name": "Watson Natural Language Understanding",
+      "url": "https://cloud.ibm.com/apidocs/natural-language-understanding/natural-language-understanding",
+      "description": "Natural language processing for advanced text analysis",
+      "auth": "OAuth",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Text Analysis",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "ibm-text-to-speech",
+      "name": "IBM Text to Speech",
+      "url": "https://cloud.ibm.com/docs/text-to-speech/getting-started.html",
+      "description": "Convert text to speech",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Development (AI-related)",
+      "source": "public-apis",
+      "tags": [
+        "audio"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "suprsonic",
+      "name": "Suprsonic",
+      "url": "https://suprsonic.ai",
+      "description": "Unified agent API: search, scrape, enrich, image gen, TTS, STT",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Development (AI-related)",
+      "source": "public-apis",
+      "tags": [
+        "vision",
+        "audio"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "webclaw",
+      "name": "Webclaw",
+      "url": "https://webclaw.io/docs/api",
+      "description": "Web content extraction for LLMs",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Development (AI-related)",
+      "source": "public-apis",
+      "tags": [
+        "llm"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "scriptmasterlabs-mcp",
+      "name": "ScriptMasterLabs MCP",
+      "url": "https://mcp-x402.onrender.com",
+      "description": "MCP server with web search, social search & LLM chat",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Development (AI-related)",
+      "source": "public-apis",
+      "tags": [
+        "llm"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "sugra",
+      "name": "Sugra",
+      "url": "https://sugra.ai",
+      "description": "Market data economics commodities climate news LLM-ready",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Finance (AI-related)",
+      "source": "public-apis",
+      "tags": [
+        "llm"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "infermedica",
+      "name": "Infermedica",
+      "url": "https://developer.infermedica.com/docs/",
+      "description": "NLP symptom checker and patient triage",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Health (AI-related)",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "lexigram",
+      "name": "Lexigram",
+      "url": "https://docs.lexigram.io/",
+      "description": "NLP clinical concepts extraction",
+      "auth": "apiKey",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Health (AI-related)",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    },
+    {
+      "id": "artificial-intelligence-jobs",
+      "name": "Artificial Intelligence Jobs",
+      "url": "https://artificialintelligencejobs.co/developers",
+      "description": "Live AI/ML job listings",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Jobs (AI-related)",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": false,
+      "keyField": null,
+      "kind": "catalog"
+    }
+  ]
+}
