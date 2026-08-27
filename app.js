@@ -1,7 +1,7 @@
 /**
- * Mohan AI v12 — Advanced multi-provider chatbot
- * Auto failover: Gemini → Groq → HuggingFace → DeepAI on 429/limit
- * Chat history · Memory · Thinking · Web · Orders · public-apis catalog
+ * Mohan AI v13 — public-apis catalog auto-failover
+ * Switch ONLY among APIs from github.com/public-apis/public-apis (ai_apis.json)
+ * Chat history · Memory · Thinking · Web · Orders · catalog tools
  */
 
 const STORAGE = {
@@ -13,9 +13,9 @@ const STORAGE = {
   memory: "moc_memory_v10",
   master: "moc_master_v1",
   rules: "moc_rules_v1",
-  prefs: "moc_prefs_v12",
+  prefs: "moc_prefs_v13",
   aiKeys: "moc_ai_keys_v11",
-  providerCool: "moc_provider_cool_v12",
+  providerCool: "moc_provider_cool_v13",
 };
 
 const AI_KEY_FIELDS = [
@@ -37,22 +37,56 @@ const AI_KEY_FIELDS = [
   { id: "audexum", label: "Audexum TTS", hint: "audexum.com" },
 ];
 
-/** Chat providers tried in order when Auto-switch is ON (limit → next). */
-const CHAT_CASCADE = [
-  { id: "gemini", label: "Gemini", kind: "gemini" },
-  { id: "groq", label: "Groq", kind: "openai", keyField: "groq", model: "llama-3.1-8b-instant",
-    url: "https://api.groq.com/openai/v1/chat/completions" },
-  { id: "huggingface", label: "Hugging Face", kind: "hf", keyField: "huggingface",
-    model: "HuggingFaceH4/zephyr-7b-beta" },
-  { id: "deepai", label: "DeepAI", kind: "deepai", keyField: "deepai" },
-];
-
-const COOL_MS = {
-  gemini: 60_000,
-  groq: 45_000,
-  huggingface: 45_000,
-  deepai: 45_000,
+/**
+ * Failover chain is built ONLY from ai_apis.json (public-apis Machine Learning / Text Analysis).
+ * No providers outside that catalog are used for auto-switch.
+ */
+const CATALOG_CHAT_RUNTIME = {
+  "google-gemini": {
+    kind: "gemini",
+    label: "Google Gemini",
+    keyField: "gemini",
+    coolMs: 60_000,
+  },
+  "groq": {
+    kind: "openai",
+    label: "Groq",
+    keyField: "groq",
+    model: "llama-3.1-8b-instant",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    coolMs: 45_000,
+  },
+  "hugging-face": {
+    kind: "hf",
+    label: "Hugging Face",
+    keyField: "huggingface",
+    model: "HuggingFaceH4/zephyr-7b-beta",
+    coolMs: 45_000,
+  },
+  "deepai": {
+    kind: "deepai",
+    label: "DeepAI",
+    keyField: "deepai",
+    coolMs: 45_000,
+  },
+  "goldbean": {
+    kind: "goldbean",
+    label: "GoldBean",
+    keyField: "goldbean",
+    coolMs: 45_000,
+  },
+  "wolframalpha": {
+    kind: "wolfram",
+    label: "WolframAlpha",
+    keyField: "wolfram",
+    coolMs: 45_000,
+  },
 };
+
+const COOL_MS_DEFAULT = 45_000;
+
+/** Filled from ai_apis.json after load — only public-apis entries with failover:true + runtime handler */
+let CHAT_CASCADE = [];
 
 const DEPRECATED = {
   "gemini-2.0-flash": "gemini-3.6-flash",
@@ -134,7 +168,7 @@ const state = {
   pendingFiles: [],
   busy: false,
   apiCoolUntil: 0,
-  activeProvider: "gemini",
+  activeProvider: "google-gemini",
   lastFailoverNote: "",
   confirmResolver: null,
 };
@@ -366,16 +400,25 @@ function isProviderCool(id) {
   return until && Date.now() < until;
 }
 function markProviderCool(id, ms) {
-  const wait = ms ?? COOL_MS[id] ?? 60_000;
+  const p = CHAT_CASCADE.find((x) => x.id === id || x.catalogId === id);
+  const wait = ms ?? p?.coolMs ?? COOL_MS_DEFAULT;
   state.providerCool = state.providerCool || {};
   state.providerCool[id] = Date.now() + wait;
-  if (id === "gemini") state.apiCoolUntil = state.providerCool[id];
+  if (id === "gemini" || id === "google-gemini") {
+    state.providerCool["gemini"] = state.providerCool[id];
+    state.providerCool["google-gemini"] = state.providerCool[id];
+    state.apiCoolUntil = state.providerCool[id];
+  }
   saveProviderCool();
 }
 function clearProviderCool(id) {
   if (!state.providerCool) return;
   delete state.providerCool[id];
-  if (id === "gemini") state.apiCoolUntil = 0;
+  if (id === "gemini" || id === "google-gemini") {
+    delete state.providerCool["gemini"];
+    delete state.providerCool["google-gemini"];
+    state.apiCoolUntil = 0;
+  }
   saveProviderCool();
 }
 function coolRemaining(id) {
@@ -383,8 +426,13 @@ function coolRemaining(id) {
   return Math.max(0, Math.ceil((until - Date.now()) / 1000));
 }
 function providerReady(p) {
-  if (isProviderCool(p.id)) return false;
-  if (p.kind === "gemini") return !!state.apiKey;
+  if (isProviderCool(p.id) || isProviderCool(p.catalogId)) return false;
+  if (p.kind === "gemini" || p.keyField === "gemini") return !!state.apiKey;
+  if (p.keyField) return !!aiKey(p.keyField);
+  return true;
+}
+function providerKeyOk(p) {
+  if (p.kind === "gemini" || p.keyField === "gemini") return !!state.apiKey;
   if (p.keyField) return !!aiKey(p.keyField);
   return true;
 }
@@ -501,7 +549,7 @@ async function runLocalAgentPass(userText, fileText) {
 async function chatWithOpenAICompat(provider, messages) {
   const key = aiKey(provider.keyField);
   if (!key) throw Object.assign(new Error(provider.label + " key missing"), { code: "nokey" });
-  const res = await fetch(provider.url, {
+  const res = await fetch(provider.endpoint || provider.url, {
     method: "POST",
     headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -590,7 +638,10 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
   const errors = [];
   let lastErr = null;
 
-  const chain = auto ? CHAT_CASCADE : CHAT_CASCADE.filter((p) => p.id === "gemini");
+  if (!CHAT_CASCADE.length) rebuildChatCascadeFromCatalog();
+  const chain = auto
+    ? CHAT_CASCADE.slice()
+    : CHAT_CASCADE.filter((p) => p.id === "google-gemini" || p.kind === "gemini");
   // If gemini cooling and auto, still skip to next
   for (const p of chain) {
     if (!providerReady(p)) {
@@ -607,7 +658,7 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
     try {
       if (p.kind === "gemini") {
         const data = await geminiGenerate({ contents, tools, toolConfig });
-        clearProviderCool("gemini");
+        clearProviderCool("google-gemini");
         state.lastFailoverNote = tried.length ? "failover tried: " + tried.join(" → ") : "";
         return { mode: "gemini", data, provider: "gemini", tried };
       }
@@ -623,7 +674,19 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
       if (p.kind === "openai") result = await chatWithOpenAICompat(p, messages);
       else if (p.kind === "hf") result = await chatWithHF(p, messages);
       else if (p.kind === "deepai") result = await chatWithDeepAI(p, messages);
-      else continue;
+      else if (p.kind === "goldbean") {
+        const r = await callPublicAiApi("goldbean", "chat", { text: messages.slice(-1)[0]?.content || userText });
+        if (r.error) { const e = new Error(r.error); e.code = r.status || 500; throw e; }
+        result = { text: r.data?.reply || r.data?.text || r.text || JSON.stringify(r.data || r) };
+      } else if (p.kind === "wolfram") {
+        const q = userText || messages.slice(-1)[0]?.content || "pi";
+        const r = await callPublicAiApi("wolframalpha", "qa", { text: q });
+        if (r.error) { const e = new Error(r.error); e.code = r.status || 500; throw e; }
+        result = { text: "**WolframAlpha** (public-apis):\n" + (r.answer || JSON.stringify(r)) };
+      } else continue;
+
+      // Tag that answer came from public-apis catalog entry
+      result._catalog = { id: p.catalogId || p.id, name: p.name || p.label, url: p.url, source: "public-apis" };
 
       clearProviderCool(p.id);
       let text = result.text || "";
@@ -633,7 +696,9 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
         text = local.text;
       }
       // banner
-      text = `_(switched to **${p.label}** — Gemini limit/cooldown)_\n\n` + text;
+      text = `_(auto-switched → **${p.label}** · public-apis: ${p.catalogId || p.id})_
+
+` + text;
       state.lastFailoverNote = "Using " + p.label;
       return {
         mode: "fallback",
@@ -674,7 +739,7 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
     "",
     local.text,
     "",
-    "Settings me backup keys add karo: **Groq** (recommended free), Hugging Face, DeepAI. Auto-switch ON rakho.",
+    "Settings me **public-apis catalog** keys add karo (Groq / Hugging Face / DeepAI / GoldBean / Wolfram). Auto-switch sirf inhi APIs pe hai.",
   ].filter(Boolean).join("\n");
   return {
     mode: "local",
@@ -691,10 +756,11 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
 function updateProviderPill() {
   const sub = $("chatSub");
   if (!sub) return;
-  const labels = { gemini: "Gemini", groq: "Groq", huggingface: "Hugging Face", deepai: "DeepAI", local: "Local tools" };
-  const name = labels[state.activeProvider] || state.activeProvider || "Gemini";
-  const auto = state.prefs.autoFailover !== false ? " · auto-switch" : "";
-  sub.textContent = name + " · tools · web · orders" + auto;
+  const p = CHAT_CASCADE.find((x) => x.id === state.activeProvider);
+  const name = p?.label || (state.activeProvider === "local" ? "Local tools" : state.activeProvider) || "Gemini";
+  const auto = state.prefs.autoFailover !== false ? " · catalog switch" : "";
+  const n = CHAT_CASCADE.length;
+  sub.textContent = name + " · public-apis (" + n + ")" + auto;
 }
 
 /* ---------------- public-apis AI catalog ---------------- */
@@ -708,13 +774,56 @@ async function loadAiCatalog() {
       apis: data.apis || [],
       count: data.count || (data.apis || []).length,
       source: data.source || "https://github.com/public-apis/public-apis",
+      failoverChain: data.failover?.chain || [],
       loaded: true,
     };
+    rebuildChatCascadeFromCatalog();
   } catch (e) {
     console.warn("AI catalog load failed", e);
     state.aiCatalog = { apis: [], count: 0, source: "", loaded: true, error: e.message };
+    rebuildChatCascadeFromCatalog();
   }
   return state.aiCatalog;
+}
+/** Build auto-switch list strictly from public-apis catalog rows (failover flag + runtime). */
+function rebuildChatCascadeFromCatalog() {
+  const apis = state.aiCatalog.apis || [];
+  const rows = apis
+    .filter((a) => a.failover && CATALOG_CHAT_RUNTIME[a.id])
+    .sort((a, b) => (a.failoverOrder || 99) - (b.failoverOrder || 99));
+  CHAT_CASCADE = rows.map((a) => {
+    const rt = CATALOG_CHAT_RUNTIME[a.id];
+    return {
+      id: a.id, // catalog id e.g. google-gemini, groq
+      catalogId: a.id,
+      name: a.name,
+      label: rt.label || a.name,
+      url: a.url,
+      description: a.description,
+      auth: a.auth,
+      kind: rt.kind,
+      keyField: rt.keyField || a.keyField || null,
+      model: rt.model,
+      endpoint: rt.url,
+      coolMs: rt.coolMs || COOL_MS_DEFAULT,
+      source: "public-apis",
+    };
+  });
+  // If catalog missing failover flags, still allow runtime keys that exist in catalog by id
+  if (!CHAT_CASCADE.length) {
+    for (const id of Object.keys(CATALOG_CHAT_RUNTIME)) {
+      const a = apis.find((x) => x.id === id) || { id, name: CATALOG_CHAT_RUNTIME[id].label };
+      if (!apis.length || apis.some((x) => x.id === id)) {
+        const rt = CATALOG_CHAT_RUNTIME[id];
+        CHAT_CASCADE.push({
+          id, catalogId: id, name: a.name || rt.label, label: rt.label,
+          url: a.url, kind: rt.kind, keyField: rt.keyField, model: rt.model,
+          endpoint: rt.url, coolMs: rt.coolMs || COOL_MS_DEFAULT, source: "public-apis",
+        });
+      }
+    }
+  }
+  return CHAT_CASCADE;
 }
 function findAiApi(idOrName) {
   const q = normalize(idOrName || "");
@@ -1304,8 +1413,8 @@ async function runTool(name, args) {
 
 /* ---------------- Gemini API ---------------- */
 async function geminiGenerate({ contents, tools, toolConfig }) {
-  if (isProviderCool("gemini") || (state.apiCoolUntil && Date.now() < state.apiCoolUntil)) {
-    const sec = coolRemaining("gemini") || Math.ceil((state.apiCoolUntil - Date.now()) / 1000);
+  if (isProviderCool("google-gemini") || (state.apiCoolUntil && Date.now() < state.apiCoolUntil)) {
+    const sec = coolRemaining("google-gemini") || Math.ceil((state.apiCoolUntil - Date.now()) / 1000);
     const e = new Error(`Gemini cooldown ${sec}s (free tier). Auto-switch will try backup APIs.`);
     e.code = 429;
     throw e;
@@ -1370,14 +1479,14 @@ async function geminiGenerate({ contents, tools, toolConfig }) {
   if (!res.ok) {
     const msg = data?.error?.message || res.statusText;
     if (res.status === 429) {
-      markProviderCool("gemini", COOL_MS.gemini);
+      markProviderCool("google-gemini");
       const e = new Error("Gemini API limit (429). Switching to backup provider if keys available…");
       e.code = 429;
       throw e;
     }
     throw new Error(msg || "Gemini failed");
   }
-  clearProviderCool("gemini");
+  clearProviderCool("google-gemini");
   return data;
 }
 
@@ -1529,8 +1638,9 @@ function renderMessages() {
     box.innerHTML = `
       <div class="welcome-hero">
         <h2>Mohan AI</h2>
-        <p>Multi-provider AI — <b>auto-switch</b> Gemini → Groq → HF → DeepAI on limits. Orders, web, memory, catalog.</p>
-        <p class="sm">Master: <b>${state.master.length}</b> · AI APIs: <b>${state.aiCatalog.count || "…"}</b> · Pool: <b>${listReadyProviders().map((p)=>p.label).join(" / ") || "add keys"}</b></p>
+        <p>Auto-switch <b>only</b> among <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> AI catalog entries on rate-limit.</p>
+        <p class="sm">Master: <b>${state.master.length}</b> · Catalog: <b>${state.aiCatalog.count || "…"}</b> · Failover: <b>${CHAT_CASCADE.map((p)=>p.label).join(" → ") || "…"}</b></p>
+        <p class="sm">Ready now: <b>${listReadyProviders().map((p)=>p.label).join(" / ") || "add keys in Settings"}</b></p>
         <div class="suggestions">
           <button type="button" data-s="List AI APIs from the catalog that can do translation">AI APIs: translate</button>
           <button type="button" data-s="Search the web: latest GST updates India">Web search</button>
@@ -1681,10 +1791,11 @@ async function sendMessage() {
   const text = $("msgInput").value.trim();
   const files = [...state.pendingFiles];
   if (!text && !files.length) return;
-  const hasAnyKey = !!(state.apiKey || aiKey("groq") || aiKey("huggingface") || aiKey("deepai"));
+  if (!CHAT_CASCADE.length) await loadAiCatalog();
+  const hasAnyKey = listReadyProviders().length > 0 || !!state.apiKey || CHAT_CASCADE.some(providerKeyOk);
   if (!hasAnyKey) {
     openSettings();
-    setStatus("Add Gemini or backup API key");
+    setStatus("Add a public-apis catalog key (Gemini / Groq / …)");
     return;
   }
 
@@ -1958,13 +2069,15 @@ function openSettings() {
   if ($("chkAutoFailover")) $("chkAutoFailover").checked = state.prefs.autoFailover !== false;
   const pool = $("failoverPoolStatus");
   if (pool) {
+    if (!CHAT_CASCADE.length) rebuildChatCascadeFromCatalog();
     const rows = CHAT_CASCADE.map((p) => {
       const ready = providerReady(p);
       const cool = isProviderCool(p.id) ? `cool ${coolRemaining(p.id)}s` : "";
-      const key = p.kind === "gemini" ? (state.apiKey ? "key✓" : "no key") : (p.keyField ? (aiKey(p.keyField) ? "key✓" : "no key") : "");
-      return `${p.label}: ${ready ? "READY" : "wait"} ${key} ${cool}`.trim();
+      const keyOk = providerKeyOk(p);
+      const key = keyOk ? "key✓" : "no key";
+      return `${p.label} [${p.catalogId || p.id}]: ${ready ? "READY" : "wait"} ${key} ${cool}`.trim();
     });
-    pool.textContent = rows.join(" · ");
+    pool.textContent = (rows.join(" · ") || "Catalog not loaded") + " · source: public-apis";
   }
   $("settingsModal").classList.remove("hidden");
 }
@@ -2004,11 +2117,12 @@ function renderAiApiList() {
           ? `<span class="tag free">No auth</span>`
           : `<span class="tag auth">${escapeHtml(a.auth)}</span>`;
       const callTag = a.callable ? `<span class="tag call">Callable</span>` : "";
-      const hasKey = a.keyField && aiKey(a.keyField);
+      const failTag = a.failover ? `<span class="tag call">Auto-switch</span>` : "";
+      const hasKey = a.keyField === "gemini" ? !!state.apiKey : (a.keyField && aiKey(a.keyField));
       return `<div class="ai-api-card" data-id="${escapeHtml(a.id)}">
         <h3>${escapeHtml(a.name)}</h3>
         <p class="desc">${escapeHtml(a.description)}</p>
-        <div class="meta">${authTag}${callTag}${tags}<span class="tag">${escapeHtml(a.category)}</span></div>
+        <div class="meta">${authTag}${callTag}${failTag}${tags}<span class="tag">${escapeHtml(a.category)}</span></div>
         <div class="actions">
           <a class="btn sm ghost" href="${escapeHtml(a.url)}" target="_blank" rel="noopener">Docs</a>
           ${
@@ -2070,8 +2184,8 @@ function openConnectors() {
     { name: "🧠 Long-term Memory", desc: "Facts saved across chats (local)", on: state.prefs.memory },
     { name: "💭 Thinking view", desc: "Show model reasoning when available", on: state.prefs.thinking },
     { name: "🤖 public-apis AI catalog", desc: `${nAi} AI APIs · ${nKeys} extra keys saved`, on: state.prefs.aiApis !== false },
-    { name: "⚡ Auto API switch", desc: "Gemini limit → Groq → HF → DeepAI automatically", on: state.prefs.autoFailover !== false },
-    { name: "🔑 Backup chat keys", desc: `${nKeys} extra keys · pool ${listReadyProviders().map(p=>p.label).join("/")||"none"}`, on: nKeys > 0 || !!state.apiKey },
+    { name: "⚡ public-apis auto-switch", desc: "Only catalog AI APIs: " + (CHAT_CASCADE.map((p) => p.label).join(" → ") || "load catalog"), on: state.prefs.autoFailover !== false },
+    { name: "🔑 Catalog chat keys", desc: `${nKeys} keys · ready ${listReadyProviders().map((p) => p.label).join("/") || "none"}`, on: nKeys > 0 || !!state.apiKey },
     { name: "📄 File upload", desc: "PDF, Excel, images in chat", on: true },
     { name: "📋 Clipboard / Export", desc: "Copy answers & order TSV", on: true },
     { name: "🔗 URL fetch tool", desc: "Read public web pages via tool", on: true },
@@ -2344,6 +2458,7 @@ async function init() {
   renderMessages();
   await loadMaster();
   await loadAiCatalog();
+  rebuildChatCascadeFromCatalog();
   $("masterStatus").textContent = `${state.master.length} products`;
   updateProviderPill();
   const pool = listReadyProviders().map((p) => p.label).join("/");
