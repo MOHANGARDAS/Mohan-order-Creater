@@ -1,6 +1,6 @@
 /**
- * Mohan AI v18 — FULL public-apis catalog (1700+ APIs, all categories)
- * Free no-key handlers + LLM failover. Paginated API browser.
+ * Mohan AI v19 — Arena-style agent chat (same format as this assistant)
+ * Hinglish · clean markdown · tables · no error spam · full public-apis catalog
  */
 
 const STORAGE = {
@@ -12,7 +12,7 @@ const STORAGE = {
   memory: "moc_memory_v10",
   master: "moc_master_v1",
   rules: "moc_rules_v1",
-  prefs: "moc_prefs_v18",
+  prefs: "moc_prefs_v19",
   aiKeys: "moc_ai_keys_v11",
   providerCool: "moc_provider_cool_v16",
 };
@@ -113,27 +113,34 @@ const BRAND_ALIAS = {
 
 const STOP = new Set("the and for of with tab tabs tablet strip cream lotion syrup soap ml gm mg bottle pack of a an".split(" "));
 
-const BASE_SYSTEM = `You are Mohan AI — an advanced assistant (ChatGPT/Gemini level) with tools.
-You help with general chat AND pharmaceutical distribution order matching for the user.
+const BASE_SYSTEM = `You are **Mohan AI** — the same kind of helpful agent the user chats with on Arena.ai Agent Mode.
+You are NOT a stiff corporate bot. Match this chat style exactly.
 
-Personality: clear, capable, concise Hinglish/English OK. Use markdown.
+# Voice & format (CRITICAL — copy this style)
+- Talk like a capable teammate: clear Hinglish/English mix is OK when user writes Hinglish.
+- Short when user wants short; structured when topic needs it.
+- Use clean markdown: **bold** key points, ## headings, bullet lists, tables.
+- Start with a one-line answer / status when useful, then details.
+- Use tables for comparisons, orders, API lists, settings.
+- Never dump raw API errors, stack traces, or "⚠️ Error: 429…" walls. Explain simply what happened and what to do.
+- Never invent pharmaceutical material codes. Only master/rules/tool results. No match → blank code + RED.
+- Be direct. If something failed, say so in plain words + next step (e.g. add Groq key, wait 60s, send lines as Name Qty).
+- End with a clear next action when relevant (link, try this, Settings path).
 
-When answering general knowledge / current events: use google search tool when enabled.
-When user sends PO/order/PDF/product lists: use order tools (parse + match_master). NEVER invent material codes — only from tool results / master.
+# What you can do
+- General chat, explainers, planning.
+- Order matching: tools match_master / match_order_lines / search_master. Output table:
+  | Code | Qty | PO Name | Pack | Status | Conf |
+  Status GREEN / YELLOW / RED from tool.
+- Web: google search tool when Web is on.
+- public-apis catalog tools: list_ai_apis, get_ai_api, call_ai_api (1700+ APIs).
+- Memory tools when user says remember…
+- On Gemini limit the app may answer via free catalog APIs — still answer in the same clean style.
 
-AI APIs catalog (from github.com/public-apis/public-apis Machine Learning + Text Analysis) is available:
-- list_ai_apis / get_ai_api — browse catalog
-- call_ai_api — invoke callable providers (Groq, HF, DeepAI, Jina, LibreTranslate, Wolfram, etc.) when user asks and keys exist
-- Prefer Gemini for main chat when available. App auto-switches to Groq/HF/DeepAI on Gemini rate-limit if keys saved.
-- use other AI APIs when user wants that provider, translation, toxicity, embeddings meta, etc.
+# Orders lock
+Final order lines: Code | Qty | PO Name (user preferred). No rates. No invented codes.
 
-You have function tools. Call them when needed. After tools run you get results — then give the final answer.
-
-For orders, final answer should include a clean markdown table:
-| Code | Qty | PO Name | Pack | Status | Conf |
-Status GREEN/YELLOW/RED from match tool.
-
-Remember user preferences from MEMORY block if provided.`;
+Remember MEMORY block facts if provided.`;
 
 /* ---------------- state ---------------- */
 function loadJSON(k, fb) {
@@ -552,15 +559,17 @@ async function runLocalAgentPass(userText, fileText, opts = {}) {
       toolTrace.push("match_order_lines");
       const result = await runTool("match_order_lines", { lines });
       orderPayload = { rows: result.rows };
-      parts.push("**Order match** (local · no Gemini needed · master/rules only):");
+      parts.push("# Order match");
+      parts.push("Local master/rules only — **no invented codes**.");
       parts.push("| Code | Qty | PO Name | Pack | Status | Conf |");
       parts.push("|---|---:|---|---|---|---:|");
       for (const r of result.rows) {
         parts.push(`| ${r.code || "—"} | ${r.qty ?? ""} | ${r.po_name || ""} | ${r.pack || ""} | ${r.status} | ${r.conf ?? 0}% |`);
       }
     } else if (hasFile) {
-      parts.push("PDF/text se clear product lines nahi milin. Gemini limit pe AI parse band hai.");
-      parts.push("Lines bhejo format me: `PRODUCT NAME 75GM 192` — local match turant chalega.");
+      parts.push("# PDF se lines clear nahi mili");
+      parts.push("Gemini limit pe AI parse off hai. Format me bhejo:");
+      parts.push("```\nPRODUCT NAME 75GM 192\n```");
     }
   }
 
@@ -581,26 +590,33 @@ async function runLocalAgentPass(userText, fileText, opts = {}) {
 
   if (!parts.length) {
     if (isGreeting) {
-      const greet = /namaste|namaskar/i.test(lower) ? "Namaste!" 
-        : /good\s*morning|\bgm\b/i.test(lower) ? "Good morning!"
-        : /good\s*evening/i.test(lower) ? "Good evening!"
-        : /thanks|thank|thx/i.test(lower) ? "You're welcome!"
-        : /bye/i.test(lower) ? "Bye! 👋"
-        : "Hi! 👋";
-      parts.push(greet + " Main **Mohan AI** hoon.");
+      const greet = /namaste|namaskar/i.test(lower) ? "Namaste" 
+        : /good\s*morning|\bgm\b/i.test(lower) ? "Good morning"
+        : /good\s*evening/i.test(lower) ? "Good evening"
+        : /thanks|thank|thx/i.test(lower) ? "Welcome"
+        : /bye/i.test(lower) ? "Bye"
+        : "Hi";
+      parts.push("# " + greet);
+      parts.push("Main **Mohan AI** hoon — orders, web, aur general chat. Batao kya chahiye.");
       if (opts.fromFailover) {
-        const wait = geminiCool > 0 ? ` Gemini free limit — ~**${geminiCool}s** baad wapas try.` : " Gemini abhi busy/limit pe hai.";
-        parts.push(wait + " Full chat ke liye Settings → **Groq** key (free) add karo — auto-switch uspe chala jayega.");
-      } else {
-        parts.push("Orders, web search, ya koi sawal bhejo.");
+        const wait = geminiCool > 0 ? ("~**" + geminiCool + "s**") : "thodi der";
+        parts.push("## Status");
+        parts.push("Gemini free limit pe hai (retry " + wait + "). Full chat ke liye **Settings → Groq** (free key) add karo.");
+        parts.push("## Ab bhi chalega (bina key)");
+        parts.push("- `What is insulin?` · `define tablet` · `USD to INR` · `weather in Mumbai` · `joke`");
+        parts.push("- Order lines: `PRODUCT 75GM 192`");
       }
     } else if (opts.fromFailover) {
-      const wait = geminiCool > 0 ? `~${geminiCool}s` : "1 min";
-      parts.push(`Gemini free tier limit pe hai (cooldown **${wait}**).`);
-      parts.push("Abhi backup catalog keys nahi mili — Settings me **Groq** (recommended) ya HF / DeepAI key save karo, phir message dobara bhejo.");
-      parts.push("Bina key ke bhi kaam: order lines (`Name Qty`), *remember that…*, time.");
+      const wait = geminiCool > 0 ? ("~**" + geminiCool + "s**") : "~1 min";
+      parts.push("# Gemini limit");
+      parts.push("Free tier cooldown " + wait + ". Raw error nahi — seedha options:");
+      parts.push("| Option | Kaise |");
+      parts.push("|--------|------|");
+      parts.push("| **Groq key** | Settings → public-apis keys → auto-switch |");
+      parts.push("| **Free APIs** | Wiki / define / FX / weather / joke |");
+      parts.push("| **Orders** | `NAME PACK QTY` lines |");
     } else {
-      parts.push("Samajh gaya. Agar order match chahiye to product lines bhejo; warna Gemini/Groq key se general chat.");
+      parts.push("Theek. Order match ho to lines bhejo; warna sawal poochho.");
     }
   }
 
@@ -827,7 +843,7 @@ async function fetchJson(url, opts = {}) {
 }
 
 async function callFreeCatalogApi(intent) {
-  const src = (id) => `_(free API · public catalog: **${id}**)_`;
+  const src = (id) => `## Source\npublic-apis / free · \`${id}\``;
   try {
     switch (intent.type) {
       case "wikipedia": {
@@ -1054,8 +1070,13 @@ async function tryFreeCatalogChat(userText, fileText) {
       callFreeCatalogApi({ type: "joke" }),
     ]);
     const bits = [];
-    bits.push("Gemini/LLM keys limited — **free catalog APIs** se jawab:");
-    bits.push("Sawal type karo jaise: *What is photosynthesis?*, *define enzyme*, *USD to INR*, *translate hello to hindi*, *joke*, *tell me about India*.");
+    bits.push("# Free catalog mode");
+    bits.push("LLM keys limited. Try:");
+    bits.push("- What is photosynthesis?");
+    bits.push("- define enzyme");
+    bits.push("- USD to INR");
+    bits.push("- translate hello to hindi");
+    bits.push("- joke · weather in Mumbai");
     if (fact.ok) bits.push(fact.text);
     return {
       mode: "free",
@@ -1157,9 +1178,7 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
         text = local.text;
       }
       // banner
-      text = `_(auto-switched → **${p.label}** · public-apis: ${p.catalogId || p.id})_
-
-` + text;
+      text = `# via ${p.label}\n\n` + text;
       state.lastFailoverNote = "Using " + p.label;
       return {
         mode: "fallback",
@@ -1224,7 +1243,9 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
   const free = await tryFreeCatalogChat(userText, fileText);
   if (free && free.text) {
     const cool = coolRemaining("google-gemini") || coolRemaining("gemini");
-    const note = cool > 0 ? `\n\n_Gemini cooldown ~${cool}s · free catalog API used (no key)._` : `\n\n_LLM keys limited · answered via **free** public-apis catalog._`;
+    const note = cool > 0
+      ? `\n\n---\nGemini cooldown ~${cool}s · yeh free catalog se aaya (no key).`
+      : `\n\n---\nLLM limited · free public-apis catalog.`;
     return {
       mode: "free",
       provider: free.provider || "free-catalog",
@@ -1262,10 +1283,13 @@ function updateProviderPill() {
   const sub = $("chatSub");
   if (!sub) return;
   const p = CHAT_CASCADE.find((x) => x.id === state.activeProvider);
-  const name = p?.label || (state.activeProvider === "local" ? "Local tools" : state.activeProvider) || "Gemini";
-  const auto = state.prefs.autoFailover !== false ? " · catalog switch" : "";
-  const n = CHAT_CASCADE.length;
-  sub.textContent = name + " · public-apis (" + n + ")" + auto;
+  let name = "Agent";
+  if (state.activeProvider === "local") name = "Local";
+  else if (state.activeProvider === "free-catalog" || (state.activeProvider || "").includes("wiki") || state.activeProvider === "wikipedia") name = "Free API";
+  else if (p?.label) name = p.label;
+  else if (state.activeProvider && state.activeProvider !== "google-gemini" && state.activeProvider !== "gemini") name = state.activeProvider;
+  else name = "Gemini";
+  sub.textContent = name + " · Mohan AI";
 }
 
 /* ---------------- public-apis AI catalog ---------------- */
@@ -2168,15 +2192,15 @@ function renderMessages() {
   if (!chat || !chat.messages.length) {
     box.innerHTML = `
       <div class="welcome-hero">
+        <div class="welcome-kicker">Agent chat</div>
         <h2>Mohan AI</h2>
-        <p>Gemini limit pe bhi chalega — <b>free catalog APIs</b> (Wikipedia, Dictionary, Translate, FX…).</p>
-        <p class="sm">Master: <b>${state.master.length}</b> · Catalog: <b>${(state.aiCatalog.count || 0).toLocaleString() || "…"}</b> APIs · Free handlers: <b>on</b></p>
-        <p class="sm">LLM pool: <b>${listReadyProviders().map((p)=>p.label).join(" / ") || "none — free APIs still work"}</b></p>
+        <p>Arena-style assistant — clear answers, tables, orders, free APIs jab Gemini limit pe ho.</p>
+        <p class="sm">Master <b>${state.master.length}</b> · Catalog <b>${(state.aiCatalog.count || 0).toLocaleString() || "…"}</b> · Pool <b>${listReadyProviders().map((p)=>p.label).join(" / ") || "free APIs"}</b></p>
         <div class="suggestions">
-          <button type="button" data-s="What is photosynthesis?">Free: Wikipedia</button>
-          <button type="button" data-s="define enzyme">Free: Dictionary</button>
-          <button type="button" data-s="USD to INR">Free: FX rates</button>
-          <button type="button" data-s="Match this order line: CHANDRIKA SOAP 75GM qty 192">Match order</button>
+          <button type="button" data-s="Short me bata: yeh app kya kya karti hai?">Kaise kaam kare</button>
+          <button type="button" data-s="What is insulin?">Explain something</button>
+          <button type="button" data-s="Match order: CHANDRIKA SOAP 75GM qty 192">Match order</button>
+          <button type="button" data-s="USD to INR">FX / free API</button>
         </div>
       </div>`;
     box.querySelectorAll("[data-s]").forEach((b) => {
@@ -2195,37 +2219,44 @@ function renderMsg(m) {
   const wrap = document.createElement("div");
   wrap.className = "msg " + (m.role === "user" ? "user" : "bot");
   wrap.dataset.id = m.id;
-  const av = m.role === "user" ? "You" : "M";
+  const isUser = m.role === "user";
   let body = "";
+  if (!isUser) {
+    body += `<div class="msg-label">Mohan AI</div>`;
+  }
   if (m.thinking && state.prefs.thinking) {
-    body += `<details class="thinking" open><summary>💭 Thinking</summary><div class="thinking-body">${escapeHtml(m.thinking)}</div></details>`;
+    body += `<details class="thinking"><summary>Thinking</summary><div class="thinking-body">${escapeHtml(m.thinking)}</div></details>`;
   }
   if (m.provider && m.provider !== "gemini" && m.provider !== "google-gemini" && !(m.soft || (m.provider === "local" && !m.tools?.length))) {
-    body += `<div class="provider-badge">via ${escapeHtml(m.provider)}</div>`;
+    body += `<div class="provider-badge">${escapeHtml(m.provider)}</div>`;
   }
-  if (m.tools?.length) {
-    body += `<div class="tool-trace">${m.tools.map((t) => escapeHtml(t)).join(" · ")}</div>`;
+  if (m.tools?.length && !m.soft) {
+    body += `<details class="tool-trace"><summary>Tools · ${m.tools.length}</summary><div>${m.tools.map((t) => escapeHtml(t)).join(" · ")}</div></details>`;
   }
-  if (m.role === "user") {
+  if (isUser) {
     body += `<div class="md">${escapeHtml(m.text || "").replace(/\n/g, "<br>")}</div>`;
-    if (m.files?.length) body += `<div class="sm" style="margin-top:6px;opacity:.85">📎 ${escapeHtml(m.files.join(", "))}</div>`;
+    if (m.files?.length) body += `<div class="file-chip">📎 ${escapeHtml(m.files.join(", "))}</div>`;
   } else {
-    body += `<div class="md">${markdown(m.text || "")}</div>`;
+    body += `<div class="md arena-md">${markdown(m.text || "")}</div>`;
   }
   if (m.order?.rows?.length) body += renderOrderCard(m.order);
   if (m.sources?.length) {
-    body += `<div class="sources"><b>Sources</b>${m.sources
+    body += `<div class="sources"><div class="sources-title">Sources</div>${m.sources
       .slice(0, 6)
       .map((s) => `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(s.title || s.url)}</a>`)
       .join("")}</div>`;
   }
-  if (m.role === "model" || m.role === "bot" || m.role === "assistant") {
+  if (!isUser) {
     body += `<div class="msg-actions">
       <button type="button" data-act="copy">Copy</button>
       <button type="button" data-act="retry">Retry</button>
     </div>`;
   }
-  wrap.innerHTML = `<div class="msg-row"><div class="avatar">${av}</div><div class="bubble">${body}</div></div>`;
+  if (isUser) {
+    wrap.innerHTML = `<div class="msg-row user-row"><div class="bubble user-bubble">${body}</div></div>`;
+  } else {
+    wrap.innerHTML = `<div class="msg-row bot-row"><div class="avatar" title="Mohan AI">M</div><div class="bubble bot-bubble">${body}</div></div>`;
+  }
   wrap.querySelectorAll("[data-act]").forEach((btn) => {
     btn.onclick = async () => {
       if (btn.dataset.act === "copy") {
@@ -2264,7 +2295,7 @@ function renderOrderCard(order) {
   const r = order.rows.filter((r) => r.status === "red").length;
   return `<div class="order-card">
     <div class="oc-head">
-      <span class="grow">📦 Order match · 🟢${g} 🟡${y} 🔴${r}</span>
+      <span class="grow">Order match · ${g} ok · ${y} check · ${r} miss</span>
       <button type="button" class="btn sm primary" data-copy-order>Copy Excel</button>
     </div>
     <div class="order-scroll"><table>
@@ -2308,7 +2339,7 @@ function addTyping() {
   const wrap = document.createElement("div");
   wrap.className = "msg bot";
   wrap.id = "typingEl";
-  wrap.innerHTML = `<div class="msg-row"><div class="avatar">M</div><div class="bubble"><span class="typing-dots"><i></i><i></i><i></i></span></div></div>`;
+  wrap.innerHTML = `<div class="msg-row bot-row"><div class="avatar">M</div><div class="bubble bot-bubble"><div class="msg-label">Mohan AI</div><span class="typing-dots"><i></i><i></i><i></i></span></div></div>`;
   $("messages").appendChild(wrap);
   $("messages").scrollTop = $("messages").scrollHeight;
 }
