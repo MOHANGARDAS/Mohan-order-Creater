@@ -6,15 +6,14 @@
   <meta name="theme-color" content="#09090b" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="description" content="Mohan AI — Arena-style agent chat for orders, web, and free public APIs" />
+  <meta name="description" content="Mohan AI — free real chatbot. No order tools. Live LLM." />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='12' width='64' height='64' fill='%2310b981'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='system-ui'%3EM%3C/text%3E%3C/svg%3E" />
   <title>Mohan AI</title>
-  <link rel="stylesheet" href="styles.css?v=19" />
+  <link rel="stylesheet" href="styles.css?v=20" />
 </head>
 <body>
   <div id="app" class="app">
-    <!-- Sidebar -->
     <aside id="sidebar" class="sidebar" aria-label="Chat history">
       <div class="sidebar-top">
         <button type="button" id="btnNewChat" class="btn-new-chat">＋ New chat</button>
@@ -24,29 +23,18 @@
       </div>
       <nav id="chatList" class="chat-list" aria-label="Conversations"></nav>
       <div class="sidebar-foot">
-        <div class="side-nav-icons" role="toolbar" aria-label="App menu">
-          <button type="button" id="btnMemory" class="side-icon" title="Memory">
-            <span class="ic" aria-hidden="true">🧠</span>
-            <span>Memory</span>
-          </button>
-          <button type="button" id="btnAiApis" class="side-icon" title="All public-apis">
-            <span class="ic" aria-hidden="true">⚡</span>
-            <span>APIs</span>
-          </button>
-          <button type="button" id="btnConnectors" class="side-icon" title="Connectors">
-            <span class="ic" aria-hidden="true">🔌</span>
-            <span>Tools</span>
-          </button>
+        <div class="side-nav-icons">
           <button type="button" id="btnSettings" class="side-icon" title="Settings">
-            <span class="ic" aria-hidden="true">⚙</span>
-            <span>Settings</span>
+            <span class="ic">⚙</span><span>Settings</span>
+          </button>
+          <button type="button" id="btnClearAll" class="side-icon" title="Clear all chats">
+            <span class="ic">🗑</span><span>Clear</span>
           </button>
         </div>
-        <p class="build">Mohan AI · v19</p>
+        <p class="build">Mohan AI · free chat</p>
       </div>
     </aside>
 
-    <!-- Main -->
     <main class="main">
       <header class="topbar">
         <button type="button" id="btnMenu" class="btn icon" aria-label="Menu">☰</button>
@@ -54,36 +42,16 @@
           <span class="logo">M</span>
           <div>
             <h1 id="chatTitle">Mohan AI</h1>
-            <p class="sub" id="chatSub">Agent chat</p>
+            <p class="sub" id="chatSub">Real AI · free</p>
           </div>
         </div>
         <div class="top-actions">
           <button type="button" id="btnTheme" class="btn icon" title="Theme">◐</button>
-          <button type="button" id="btnExportChat" class="btn ghost sm">Export</button>
         </div>
       </header>
 
       <div class="tool-bar" id="toolBar">
-        <label class="chip-toggle" title="Show model thinking">
-          <input type="checkbox" id="chkThinking" />
-          <span>Thinking</span>
-        </label>
-        <label class="chip-toggle" title="Google Search grounding">
-          <input type="checkbox" id="chkWeb" checked />
-          <span>Web</span>
-        </label>
-        <label class="chip-toggle" title="Order / master tools">
-          <input type="checkbox" id="chkOrderTools" checked />
-          <span>Orders</span>
-        </label>
-        <label class="chip-toggle" title="Use saved memory">
-          <input type="checkbox" id="chkMemory" checked />
-          <span>Memory</span>
-        </label>
-        <label class="chip-toggle" title="public-apis AI catalog tools">
-          <input type="checkbox" id="chkAiApis" checked />
-          <span>AI APIs</span>
-        </label>
+        <span class="pill" id="modelPill">Auto free LLM</span>
         <span class="spacer"></span>
         <span class="pill" id="statusPill">Ready</span>
       </div>
@@ -93,151 +61,80 @@
       <div class="composer-wrap">
         <div id="attachPreview" class="attach-preview hidden"></div>
         <div class="composer">
-          <label class="icon-btn" title="Attach files">
+          <label class="icon-btn" title="Attach image">
             ＋
-            <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.csv,.txt,.doc,.docx,image/*,.json" multiple hidden />
+            <input type="file" id="fileInput" accept="image/*,.txt,.md,.csv,.json" multiple hidden />
           </label>
           <textarea id="msgInput" rows="1" placeholder="Message Mohan AI…" enterkeyhint="send"></textarea>
           <button type="button" id="btnSend" class="send" aria-label="Send">➤</button>
         </div>
-        <p class="hint">Enter to send · Shift+Enter for newline</p>
+        <p class="hint">Free real AI · no fixed scripts · Enter to send</p>
       </div>
     </main>
   </div>
 
-  <!-- Settings -->
   <div id="settingsModal" class="modal hidden" role="dialog">
     <div class="modal-card">
       <div class="modal-head">
         <h2>Settings</h2>
         <button type="button" class="btn icon" id="btnCloseSettings">✕</button>
       </div>
+
       <label class="field">
-        <span>Gemini API Key <small>(primary · device only)</small></span>
-        <div class="row">
-          <input type="password" id="apiKeyInput" class="input" placeholder="AIza…" autocomplete="off" />
-          <button type="button" id="btnToggleKey" class="btn ghost sm">Show</button>
-        </div>
-      </label>
-      <label class="field">
-        <span>Model</span>
-        <select id="modelSelect" class="input">
-          <option value="gemini-3.6-flash">gemini-3.6-flash (recommended)</option>
-          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-          <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+        <span>Chat engine</span>
+        <select id="engineSelect" class="input">
+          <option value="auto">Auto (free first → your keys)</option>
+          <option value="pollinations">Pollinations (free · no key)</option>
+          <option value="gemini">Google Gemini (free key)</option>
+          <option value="groq">Groq (free key)</option>
+          <option value="openrouter">OpenRouter free models (free key)</option>
         </select>
       </label>
-      <div class="field failover-box">
-        <label class="chip-toggle">
-          <input type="checkbox" id="chkAutoFailover" checked />
-          <span>Auto-switch only public-apis catalog AI APIs</span>
-        </label>
-        <p class="status-line" id="failoverPoolStatus">—</p>
-        <p class="fineprint">On LLM limit: free catalog APIs (Wikipedia, Dictionary, LibreTranslate, FX, Jina…) still answer — <b>no key</b>. Then Groq/HF if keys saved.</p>
-      </div>
+
+      <p class="fineprint">
+        <b>Default free:</b> Pollinations live LLM — no signup, no card.
+        Optional keys only if you want Gemini / Groq / OpenRouter.
+      </p>
+
+      <label class="field">
+        <span>Gemini API key <small>(optional)</small></span>
+        <div class="row">
+          <input type="password" id="geminiKey" class="input" placeholder="AIza…" autocomplete="off" />
+          <button type="button" class="btn ghost sm" data-toggle="geminiKey">Show</button>
+        </div>
+        <p class="fineprint"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get free key</a></p>
+      </label>
+
+      <label class="field">
+        <span>Groq API key <small>(optional · fast free Llama)</small></span>
+        <div class="row">
+          <input type="password" id="groqKey" class="input" placeholder="gsk_…" autocomplete="off" />
+          <button type="button" class="btn ghost sm" data-toggle="groqKey">Show</button>
+        </div>
+        <p class="fineprint"><a href="https://console.groq.com/keys" target="_blank" rel="noopener">Get free key</a></p>
+      </label>
+
+      <label class="field">
+        <span>OpenRouter key <small>(optional · free models)</small></span>
+        <div class="row">
+          <input type="password" id="openrouterKey" class="input" placeholder="sk-or-…" autocomplete="off" />
+          <button type="button" class="btn ghost sm" data-toggle="openrouterKey">Show</button>
+        </div>
+        <p class="fineprint"><a href="https://openrouter.ai/keys" target="_blank" rel="noopener">Get free key</a> · use :free models</p>
+      </label>
+
       <label class="field">
         <span>System personality</span>
-        <textarea id="systemPrompt" class="input" rows="3" placeholder="Optional extra instructions…"></textarea>
+        <textarea id="systemPrompt" class="input" rows="3" placeholder="Optional — how Mohan should talk…"></textarea>
       </label>
-      <label class="field">
-        <span>Master products Excel</span>
-        <input type="file" id="masterFileInput" accept=".xlsx,.xls,.csv" />
-        <p class="status-line" id="masterStatus">—</p>
-      </label>
-      <div class="field">
-        <span>public-apis catalog keys <small>(auto-switch pool)</small></span>
-        <p class="fineprint" style="margin:0 0 6px">LLMs need keys. Free APIs (Wiki/Dict/FX…) need none. Groq optional for full chat backup.</p>
-        <div class="ai-keys-grid" id="aiKeysGrid"></div>
-        <p class="fineprint">Keys stay on this device. Free: console.groq.com · hf.co/settings/tokens · deepai.org</p>
-      </div>
-      <div class="field">
-        <span>Data</span>
-        <div class="row wrap gap">
-          <button type="button" id="btnExportAll" class="btn sm">Export all</button>
-          <label class="btn sm">Import<input type="file" id="importAllInput" accept=".json" hidden /></label>
-          <button type="button" id="btnClearHistory" class="btn sm danger">Clear history</button>
-        </div>
-      </div>
-      <p class="fineprint">API keys stay in this browser. Order codes only from master/rules.</p>
+
       <button type="button" id="btnSaveSettings" class="btn primary block">Save</button>
-    </div>
-  </div>
-
-  <!-- Memory -->
-  <div id="memoryModal" class="modal hidden" role="dialog">
-    <div class="modal-card">
-      <div class="modal-head">
-        <h2>Memory</h2>
-        <button type="button" class="btn icon" id="btnCloseMemory">✕</button>
-      </div>
-      <p class="muted sm">Facts remembered across chats (local).</p>
-      <div id="memoryList" class="memory-list"></div>
-      <div class="row gap">
-        <input type="text" id="memoryInput" class="input" placeholder="Add memory…" />
-        <button type="button" id="btnAddMemory" class="btn primary sm">Add</button>
-      </div>
-      <button type="button" id="btnClearMemory" class="btn danger sm" style="margin-top:10px">Clear all</button>
-    </div>
-  </div>
-
-  <!-- Connectors -->
-  <div id="connectorsModal" class="modal hidden" role="dialog">
-    <div class="modal-card wide">
-      <div class="modal-head">
-        <h2>Connectors & tools</h2>
-        <button type="button" class="btn icon" id="btnCloseConnectors">✕</button>
-      </div>
-      <div class="conn-grid" id="connGrid"></div>
-      <p class="fineprint">Built-in tools run in-browser. Catalog failover uses public-apis AI entries only.</p>
-    </div>
-  </div>
-
-  <!-- AI APIs — full public-apis catalog -->
-  <div id="aiApisModal" class="modal hidden" role="dialog">
-    <div class="modal-card xwide">
-      <div class="modal-head">
-        <h2>APIs · public-apis</h2>
-        <button type="button" class="btn icon" id="btnCloseAiApis">✕</button>
-      </div>
-      <p class="muted sm">Full catalog from <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> (all categories, 1700+). Callable/free ones can run in chat; others open docs.</p>
-      <div class="row wrap gap ai-filter-bar">
-        <input type="search" id="aiApiSearch" class="input grow" placeholder="Search 1700+ APIs…" />
-        <select id="aiApiCat" class="input" style="max-width:200px">
-          <option value="">All categories</option>
-        </select>
-        <select id="aiApiTag" class="input" style="max-width:140px">
-          <option value="">All tags</option>
-          <option value="ai">AI</option>
-          <option value="nlp">NLP</option>
-          <option value="vision">Vision</option>
-          <option value="audio">Audio</option>
-          <option value="data">Data</option>
-          <option value="api">General</option>
-        </select>
-        <label class="chip-toggle"><input type="checkbox" id="aiApiCallableOnly" /><span>Callable</span></label>
-        <label class="chip-toggle"><input type="checkbox" id="aiApiFreeOnly" /><span>No auth / free</span></label>
-      </div>
-      <p class="status-line" id="aiApiCount">—</p>
-      <div id="aiApiList" class="ai-api-list"></div>
-    </div>
-  </div>
-
-  <div id="confirmModal" class="modal hidden" role="dialog">
-    <div class="modal-card sm">
-      <h2 id="confirmTitle">Confirm</h2>
-      <pre id="confirmBody" class="confirm-body"></pre>
-      <div class="row end gap">
-        <button type="button" id="btnConfirmNo" class="btn ghost">No</button>
-        <button type="button" id="btnConfirmYes" class="btn primary">Yes</button>
-      </div>
     </div>
   </div>
 
   <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="app.js?v=19" type="module"></script>
+  <script src="app.js?v=20" type="module"></script>
 </body>
 </html>

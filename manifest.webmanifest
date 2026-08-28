@@ -1,7 +1,7 @@
 {
   "name": "Mohan AI",
   "short_name": "Mohan AI",
-  "description": "Advanced Gemini chatbot — tools, web, memory, orders, public-apis AI catalog",
+  "description": "Free real AI chatbot",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#09090b",
@@ -9,7 +9,7 @@
   "lang": "en",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='14' width='64' height='64' fill='%230f766e'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='sans-serif'%3EM%3C/text%3E%3C/svg%3E",
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='12' width='64' height='64' fill='%2310b981'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='system-ui'%3EM%3C/text%3E%3C/svg%3E",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
