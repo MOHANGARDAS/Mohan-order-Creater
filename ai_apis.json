@@ -5,8 +5,8 @@
     "Text Analysis",
     "AI-related extras"
   ],
-  "updated": "2026-08-27",
-  "count": 62,
+  "updated": "2026-08-28",
+  "count": 74,
   "apis": [
     {
       "id": "ai-economics-tools",
@@ -25,7 +25,8 @@
       "callable": true,
       "keyField": null,
       "kind": "calc",
-      "failover": false
+      "failover": false,
+      "freeChat": true
     },
     {
       "id": "ai-for-thai",
@@ -173,7 +174,8 @@
       "callable": true,
       "keyField": null,
       "kind": "nlp",
-      "failover": false
+      "failover": false,
+      "freeChat": true
     },
     {
       "id": "exude-api",
@@ -385,7 +387,8 @@
       "callable": true,
       "keyField": "jina",
       "kind": "reader",
-      "failover": false
+      "failover": false,
+      "freeChat": true
     },
     {
       "id": "keen-io",
@@ -495,7 +498,8 @@
       "callable": true,
       "keyField": null,
       "kind": "search",
-      "failover": false
+      "failover": false,
+      "freeChat": true
     },
     {
       "id": "openvisionapi",
@@ -513,7 +517,8 @@
       "callable": true,
       "keyField": null,
       "kind": "vision",
-      "failover": false
+      "failover": false,
+      "freeChat": true
     },
     {
       "id": "perspective",
@@ -586,7 +591,8 @@
       "callable": true,
       "keyField": null,
       "kind": "meta",
-      "failover": false
+      "failover": false,
+      "freeChat": true
     },
     {
       "id": "tensorfeed",
@@ -604,7 +610,8 @@
       "callable": true,
       "keyField": null,
       "kind": "news",
-      "failover": false
+      "failover": false,
+      "freeChat": true
     },
     {
       "id": "time-door",
@@ -930,7 +937,10 @@
       "callable": true,
       "keyField": null,
       "kind": "translate",
-      "failover": false
+      "failover": true,
+      "failoverOrder": 9,
+      "failoverRole": "free",
+      "freeChat": true
     },
     {
       "id": "semantria",
@@ -1149,18 +1159,294 @@
       "keyField": null,
       "kind": "catalog",
       "failover": false
+    },
+    {
+      "id": "wikipedia",
+      "name": "Wikipedia",
+      "url": "https://en.wikipedia.org/api/rest_v1/",
+      "description": "Free encyclopedia summaries for knowledge questions (no key)",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Open Data (AI-related free)",
+      "source": "public-apis-ecosystem",
+      "tags": [
+        "nlp",
+        "data"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "knowledge",
+      "failover": true,
+      "failoverOrder": 10,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "free-dictionary",
+      "name": "Free Dictionary",
+      "url": "https://dictionaryapi.dev/",
+      "description": "Definitions, phonetics, synonyms — no API key",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Dictionaries (AI-related free)",
+      "source": "public-apis",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "dictionary",
+      "failover": true,
+      "failoverOrder": 11,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "jina-reader-free",
+      "name": "Jina Reader (free URL)",
+      "url": "https://jina.ai",
+      "description": "Read public web pages as markdown without key via r.jina.ai",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Machine Learning",
+      "source": "public-apis-jina",
+      "tags": [
+        "nlp",
+        "llm"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "reader",
+      "failover": true,
+      "failoverOrder": 12,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "datamuse",
+      "name": "Datamuse",
+      "url": "https://www.datamuse.com/api/",
+      "description": "Word-finding query engine — means like, sounds like, rhymes",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Dictionaries (AI-related free)",
+      "source": "public-apis-ecosystem",
+      "tags": [
+        "nlp"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "words",
+      "failover": true,
+      "failoverOrder": 13,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "open-trivia",
+      "name": "Open Trivia DB",
+      "url": "https://opentdb.com/api_config.php",
+      "description": "Free trivia questions JSON API — no key",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Games & Comics (free)",
+      "source": "public-apis-ecosystem",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "trivia",
+      "failover": true,
+      "failoverOrder": 14,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "exchange-rate-api",
+      "name": "Open Exchange Rate API",
+      "url": "https://www.exchangerate-api.com/",
+      "description": "Free USD-based live FX rates — no key on open.er-api.com",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Currency Exchange (free)",
+      "source": "public-apis-ecosystem",
+      "tags": [
+        "data"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "fx",
+      "failover": true,
+      "failoverOrder": 15,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "advice-slip",
+      "name": "Advice Slip",
+      "url": "https://api.adviceslip.com/",
+      "description": "Random advice slips — no key",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Personality (free)",
+      "source": "public-apis-ecosystem",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "advice",
+      "failover": true,
+      "failoverOrder": 16,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "jokeapi",
+      "name": "JokeAPI",
+      "url": "https://sv443.net/jokeapi/v2/",
+      "description": "Programming and general jokes — no key",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Entertainment (free)",
+      "source": "public-apis-ecosystem",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "joke",
+      "failover": true,
+      "failoverOrder": 17,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "useless-facts",
+      "name": "Useless Facts",
+      "url": "https://uselessfacts.jsph.pl/",
+      "description": "Random useless facts — no key",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Entertainment (free)",
+      "source": "public-apis-ecosystem",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "fact",
+      "failover": true,
+      "failoverOrder": 18,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "zen-quotes",
+      "name": "Zen Quotes",
+      "url": "https://zenquotes.io/",
+      "description": "Inspirational quotes — no key",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Personality (free)",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "quote",
+      "failover": true,
+      "failoverOrder": 19,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "bored-api",
+      "name": "Bored API",
+      "url": "https://bored-api.appbrewery.com/",
+      "description": "Suggest random activities — no key",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Unknown",
+      "category": "Entertainment (free)",
+      "source": "public-apis",
+      "tags": [
+        "ai"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "activity",
+      "failover": true,
+      "failoverOrder": 20,
+      "failoverRole": "free",
+      "freeChat": true
+    },
+    {
+      "id": "rest-countries",
+      "name": "REST Countries",
+      "url": "https://restcountries.com/",
+      "description": "Country info JSON — no key",
+      "auth": "No",
+      "https": "Yes",
+      "cors": "Yes",
+      "category": "Geocoding (free)",
+      "source": "public-apis",
+      "tags": [
+        "data"
+      ],
+      "callable": true,
+      "keyField": null,
+      "kind": "country",
+      "failover": true,
+      "failoverOrder": 21,
+      "failoverRole": "free",
+      "freeChat": true
     }
   ],
   "failover": {
-    "note": "Auto-switch only among these public-apis catalog entries when rate-limited",
+    "note": "Auto-switch: key LLMs first, then FREE no-key catalog APIs (Wikipedia, Dictionary, Translate, …)",
     "source": "https://github.com/public-apis/public-apis",
-    "chain": [
+    "chain_llm": [
       "google-gemini",
       "groq",
       "hugging-face",
       "deepai",
       "goldbean",
       "wolframalpha"
+    ],
+    "chain_free": [
+      "libretranslate",
+      "wikipedia",
+      "free-dictionary",
+      "jina-reader-free",
+      "datamuse",
+      "open-trivia",
+      "exchange-rate-api",
+      "advice-slip",
+      "jokeapi",
+      "useless-facts",
+      "zen-quotes",
+      "bored-api",
+      "rest-countries",
+      "ai-economics-tools",
+      "dreamthreads",
+      "jina-ai",
+      "not-human-search",
+      "openvisionapi",
+      "statlyte",
+      "tensorfeed"
     ]
   }
 }

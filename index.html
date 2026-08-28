@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='12' width='64' height='64' fill='%2310b981'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='system-ui'%3EM%3C/text%3E%3C/svg%3E" />
   <title>Mohan AI</title>
-  <link rel="stylesheet" href="styles.css?v=15" />
+  <link rel="stylesheet" href="styles.css?v=16" />
 </head>
 <body>
   <div id="app" class="app">
@@ -42,7 +42,7 @@
             <span>Settings</span>
           </button>
         </div>
-        <p class="build">Mohan AI · v15</p>
+        <p class="build">Mohan AI · v16</p>
       </div>
     </aside>
 
@@ -133,7 +133,7 @@
           <span>Auto-switch only public-apis catalog AI APIs</span>
         </label>
         <p class="status-line" id="failoverPoolStatus">—</p>
-        <p class="fineprint">On limit, next API is only from <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> (Gemini → Groq → HF → DeepAI → GoldBean → Wolfram). Keys below.</p>
+        <p class="fineprint">On LLM limit: free catalog APIs (Wikipedia, Dictionary, LibreTranslate, FX, Jina…) still answer — <b>no key</b>. Then Groq/HF if keys saved.</p>
       </div>
       <label class="field">
         <span>System personality</span>
@@ -146,7 +146,7 @@
       </label>
       <div class="field">
         <span>public-apis catalog keys <small>(auto-switch pool)</small></span>
-        <p class="fineprint" style="margin:0 0 6px">Failover = catalog only. Groq recommended free backup.</p>
+        <p class="fineprint" style="margin:0 0 6px">LLMs need keys. Free APIs (Wiki/Dict/FX…) need none. Groq optional for full chat backup.</p>
         <div class="ai-keys-grid" id="aiKeysGrid"></div>
         <p class="fineprint">Keys stay on this device. Free: console.groq.com · hf.co/settings/tokens · deepai.org</p>
       </div>
@@ -237,6 +237,6 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="app.js?v=15" type="module"></script>
+  <script src="app.js?v=16" type="module"></script>
 </body>
 </html>

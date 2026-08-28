@@ -1,7 +1,7 @@
 /**
- * Mohan AI v14 — public-apis catalog auto-failover
- * Switch ONLY among APIs from github.com/public-apis/public-apis (ai_apis.json)
- * Chat history · Memory · Thinking · Web · Orders · catalog tools
+ * Mohan AI v16 — free catalog APIs work without Gemini keys
+ * public-apis + free no-key: Wikipedia, Dictionary, Translate, Jina, FX, jokes…
+ * Key LLMs first; on 429 auto-route to free catalog endpoints
  */
 
 const STORAGE = {
@@ -13,9 +13,9 @@ const STORAGE = {
   memory: "moc_memory_v10",
   master: "moc_master_v1",
   rules: "moc_rules_v1",
-  prefs: "moc_prefs_v13",
+  prefs: "moc_prefs_v16",
   aiKeys: "moc_ai_keys_v11",
-  providerCool: "moc_provider_cool_v13",
+  providerCool: "moc_provider_cool_v16",
 };
 
 const AI_KEY_FIELDS = [
@@ -656,9 +656,344 @@ async function chatWithDeepAI(provider, messages) {
   return { text, raw: data };
 }
 
+
+/* ---------------- FREE public / catalog APIs (no key) ---------------- */
+const FREE_API_ENDPOINTS = {
+  wikipedia: (q) => `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(q)}`,
+  wikiSearch: (q) => `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(q)}&limit=5&namespace=0&format=json&origin=*`,
+  dictionary: (w) => `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(w)}`,
+  datamuse: (q) => `https://api.datamuse.com/words?ml=${encodeURIComponent(q)}&max=8`,
+  rhyme: (q) => `https://api.datamuse.com/words?rel_rhy=${encodeURIComponent(q)}&max=12`,
+  translate: null, // POST
+  jina: (url) => `https://r.jina.ai/${url}`,
+  fx: () => `https://open.er-api.com/v6/latest/USD`,
+  trivia: () => `https://opentdb.com/api.php?amount=1`,
+  advice: () => `https://api.adviceslip.com/advice`,
+  joke: () => `https://v2.jokeapi.dev/joke/Any?type=single`,
+  fact: () => `https://uselessfacts.jsph.pl/api/v2/facts/random`,
+  quote: () => `https://zenquotes.io/api/random`,
+  bored: () => `https://bored-api.appbrewery.com/random`,
+  country: (q) => `https://restcountries.com/v3.1/name/${encodeURIComponent(q)}?fields=name,capital,population,region,currencies,languages,flags`,
+  catfact: () => `https://catfact.ninja/fact`,
+  meow: () => `https://meowfacts.herokuapp.com/`,
+};
+
+function stripUserText(t) {
+  return String(t || "").replace(/^[\s\S]*---\nUser:\n/i, "").trim() || String(t || "").trim();
+}
+
+function detectFreeIntent(raw) {
+  const t = stripUserText(raw);
+  const lower = t.toLowerCase().trim();
+  if (!lower || lower.length < 1) return { type: "none" };
+
+  // URL fetch via Jina free
+  const urlM = t.match(/https?:\/\/[^\s]+/i);
+  if (urlM || /\b(read|fetch|summarize|open)\b.*https?:\/\//i.test(t)) {
+    return { type: "jina", url: (urlM || t.match(/https?:\/\/[^\s]+/i) || [])[0], query: t };
+  }
+
+  // Translate
+  const tr = lower.match(/(?:translate|tarjuma|hindi me|in hindi|to hindi|to english|angrezi|english me)\s*[:\-]?\s*(.+)$/i)
+    || lower.match(/^(.+?)\s+(?:ko|in)\s+(hindi|english|spanish|french|german|marathi|tamil)\s*(?:me|mein)?$/i);
+  if (/\b(translate|tarjuma|libretranslate)\b/i.test(lower) || tr) {
+    let text = t, target = "hi";
+    if (/to\s+english|angrezi|english me/i.test(lower)) target = "en";
+    if (/to\s+spanish/i.test(lower)) target = "es";
+    if (/to\s+french/i.test(lower)) target = "fr";
+    if (/to\s+german/i.test(lower)) target = "de";
+    if (/to\s+marathi/i.test(lower)) target = "mr";
+    const m = t.match(/(?:translate|tarjuma)\s*(?:to\s+\w+)?\s*[:\-]?\s*(.+)/i);
+    if (m) text = m[1].trim();
+    text = text.replace(/\s*(to|in)\s+(hindi|english|spanish|french|german|marathi).*/i, "").trim() || text;
+    return { type: "translate", text, target };
+  }
+
+  // FX / currency
+  if (/\b(usd|inr|eur|gbp|currency|exchange rate|dollar|rupee|forex|fx)\b/i.test(lower) && /\b(rate|price|kitna|convert|to|into|=)\b/i.test(lower)
+      || /\$?\d+\s*(usd|dollars?)?\s*(to|in|into)\s*(inr|rupees?|eur|gbp)/i.test(lower)
+      || /\b(dollar|usd).{0,20}(rupee|inr)/i.test(lower)) {
+    return { type: "fx", query: t };
+  }
+
+  // Dictionary define
+  const def = lower.match(/^(?:define|meaning of|what does|dictionary|synonym(?:s)? of|antonym(?:s)? of)\s+["']?([a-z][a-z\-']+)["']?/i)
+    || lower.match(/^([a-z][a-z\-']{1,24})\s+ka\s+matlab/i)
+    || lower.match(/^what is the meaning of\s+([a-z][a-z\-']+)/i);
+  if (def || /^(define|meaning)\b/i.test(lower)) {
+    const word = (def && def[1]) || lower.replace(/^(define|meaning of|dictionary)\s+/i, "").split(/\s+/)[0];
+    return { type: "dictionary", word: word.replace(/[^a-z\-']/gi, "") };
+  }
+
+  // Words / rhyme
+  if (/\b(rhyme|rhymes with|similar to|words like)\b/i.test(lower)) {
+    const w = lower.replace(/.*(?:rhyme(?:s)? with|similar to|words like)\s+/i, "").split(/\s+/)[0];
+    return { type: "words", word: w, rhyme: /rhyme/i.test(lower) };
+  }
+
+  // Country
+  const ctry = lower.match(/(?:about|capital of|population of|tell me about)\s+(?:the\s+)?([a-z][a-z\s]{1,30}?)\s*$/i);
+  if (/\b(capital of|population of|country)\b/i.test(lower) || (ctry && /\b(india|usa|france|japan|china|brazil|germany|australia)\b/i.test(lower))) {
+    let name = lower.replace(/.*(?:capital of|population of|about|country)\s+/i, "").replace(/\?+$/, "").trim();
+    name = name.replace(/^(the)\s+/, "");
+    if (name.length > 1 && name.length < 40) return { type: "country", name };
+  }
+
+  // Entertainment intents
+  if (/\b(joke|hansa|funny)\b/i.test(lower)) return { type: "joke" };
+  if (/\b(advice|salah|suggest(?:ion)?)\b/i.test(lower) && !/\border\b/i.test(lower)) return { type: "advice" };
+  if (/\b(quote|quotation|suvihar|inspiration)\b/i.test(lower)) return { type: "quote" };
+  if (/\b(fact|interesting fact|random fact|fun fact)\b/i.test(lower)) return { type: "fact" };
+  if (/\b(bored|activity|kuch karne|kya karun)\b/i.test(lower)) return { type: "bored" };
+  if (/\b(trivia|quiz|question)\b/i.test(lower)) return { type: "trivia" };
+  if (/\b(cat fact|meow)\b/i.test(lower)) return { type: "catfact" };
+
+  // Knowledge / wiki — questions
+  const isQ = /\?$/.test(t) || /^(who|what|when|where|why|how|which|kya|kaun|kab|kahan|kyun|kaise)\b/i.test(lower)
+    || /\b(tell me about|explain|info on|information about|wikipedia)\b/i.test(lower);
+  if (isQ && lower.length > 3 && lower.length < 220 && !/\b(order|match|po\b|qty|chandrika)\b/i.test(lower)) {
+    let topic = t.replace(/\?+$/, "");
+    topic = topic.replace(/^(who is|what is|what's|whats|tell me about|explain|wikipedia|info on|information about)\s+/i, "");
+    topic = topic.replace(/^(kya hai|kaun hai)\s+/i, "");
+    topic = topic.trim().slice(0, 80) || t.slice(0, 80);
+    return { type: "wikipedia", topic };
+  }
+
+  // Short topic-like (2-5 words, not greeting)
+  if (/^[a-z][a-z0-9\s\-.]{2,48}$/i.test(t) && t.split(/\s+/).length <= 6
+      && !/^(hi|hello|hey|ok|thanks|test|ping)$/i.test(lower)
+      && !/\b(order|match|remember)\b/i.test(lower)) {
+    return { type: "wikipedia", topic: t.trim() };
+  }
+
+  return { type: "none", query: t };
+}
+
+async function fetchJson(url, opts = {}) {
+  const res = await fetch(url, { ...opts, signal: opts.signal });
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    const data = await res.json().catch(() => null);
+    return { ok: res.ok, status: res.status, data, text: null };
+  }
+  const text = await res.text();
+  try {
+    return { ok: res.ok, status: res.status, data: JSON.parse(text), text };
+  } catch {
+    return { ok: res.ok, status: res.status, data: null, text };
+  }
+}
+
+async function callFreeCatalogApi(intent) {
+  const src = (id) => `_(free API · public catalog: **${id}**)_`;
+  try {
+    switch (intent.type) {
+      case "wikipedia": {
+        const topic = intent.topic || intent.query || "India";
+        let r = await fetchJson(FREE_API_ENDPOINTS.wikipedia(topic));
+        if (!r.ok || r.data?.type === "disambiguation" || r.status === 404) {
+          const s = await fetchJson(FREE_API_ENDPOINTS.wikiSearch(topic));
+          const titles = s.data?.[1] || [];
+          if (titles[0]) r = await fetchJson(FREE_API_ENDPOINTS.wikipedia(titles[0]));
+          if (!r.ok && titles.length) {
+            return {
+              ok: true,
+              provider: "wikipedia",
+              text: `${src("wikipedia")}\n\n**Search results for “${topic}”:**\n` + titles.map((t, i) => `${i + 1}. ${t}`).join("\n") + `\n\n_Pick a title, or add Groq key for full AI chat._`,
+            };
+          }
+        }
+        if (!r.ok || !r.data) return { ok: false, error: "Wikipedia miss", provider: "wikipedia" };
+        const d = r.data;
+        const extract = d.extract || d.description || "";
+        const link = d.content_urls?.desktop?.page || d.content_urls?.mobile?.page || "";
+        return {
+          ok: true,
+          provider: "wikipedia",
+          text: `${src("wikipedia")}\n\n## ${d.title || topic}\n\n${extract}${link ? `\n\n[Read more](${link})` : ""}`,
+        };
+      }
+      case "dictionary": {
+        const word = intent.word || "hello";
+        const r = await fetchJson(FREE_API_ENDPOINTS.dictionary(word));
+        if (!r.ok || !Array.isArray(r.data)) return { ok: false, error: "Word not found", provider: "free-dictionary" };
+        const e0 = r.data[0];
+        const phon = (e0.phonetics || []).map((p) => p.text).filter(Boolean)[0] || "";
+        const lines = [`${src("free-dictionary")}\n\n## ${e0.word} ${phon}`];
+        for (const m of (e0.meanings || []).slice(0, 3)) {
+          lines.push(`\n**${m.partOfSpeech}**`);
+          for (const def of (m.definitions || []).slice(0, 2)) {
+            lines.push(`- ${def.definition}${def.example ? ` _(${def.example})_` : ""}`);
+          }
+          if (m.synonyms?.length) lines.push(`Synonyms: ${m.synonyms.slice(0, 6).join(", ")}`);
+        }
+        return { ok: true, provider: "free-dictionary", text: lines.join("\n") };
+      }
+      case "words": {
+        const w = intent.word || "happy";
+        const url = intent.rhyme ? FREE_API_ENDPOINTS.rhyme(w) : FREE_API_ENDPOINTS.datamuse(w);
+        const r = await fetchJson(url);
+        const words = (r.data || []).map((x) => x.word).filter(Boolean);
+        return {
+          ok: true,
+          provider: "datamuse",
+          text: `${src("datamuse")}\n\n**${intent.rhyme ? "Rhymes" : "Related words"} for “${w}”:**\n` + (words.join(", ") || "_none_"),
+        };
+      }
+      case "translate": {
+        const res = await fetch("https://libretranslate.com/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ q: intent.text || "hello", source: "auto", target: intent.target || "hi", format: "text" }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return { ok: false, error: data.error || res.statusText, provider: "libretranslate" };
+        return {
+          ok: true,
+          provider: "libretranslate",
+          text: `${src("libretranslate")}\n\n**${intent.text}**\n\n→ **${data.translatedText}** _(${intent.target || "hi"})_`,
+        };
+      }
+      case "jina": {
+        const url = intent.url;
+        if (!url) return { ok: false, error: "No URL", provider: "jina-reader-free" };
+        const res = await fetch(FREE_API_ENDPOINTS.jina(url), { headers: { Accept: "text/plain" } });
+        const text = await res.text();
+        if (!res.ok) return { ok: false, error: text.slice(0, 200), provider: "jina-reader-free" };
+        return {
+          ok: true,
+          provider: "jina-reader-free",
+          text: `${src("jina-reader-free")}\n\n${truncate(text, 8000)}`,
+        };
+      }
+      case "fx": {
+        const r = await fetchJson(FREE_API_ENDPOINTS.fx());
+        if (!r.ok || !r.data?.rates) return { ok: false, error: "FX failed", provider: "exchange-rate-api" };
+        const rates = r.data.rates;
+        const q = intent.query || "";
+        const amtM = q.match(/(\d+(?:\.\d+)?)/);
+        const amt = amtM ? Number(amtM[1]) : 1;
+        const inr = rates.INR, eur = rates.EUR, gbp = rates.GBP;
+        let body = `${src("exchange-rate-api")}\n\n**Live FX** (base USD, ${r.data.time_last_update_utc || "now"})\n\n`;
+        body += `| Pair | Rate |\n|---|---:|\n| USD → INR | ${inr} |\n| USD → EUR | ${eur} |\n| USD → GBP | ${gbp} |\n`;
+        if (inr && amt) body += `\n**${amt} USD ≈ ${(amt * inr).toFixed(2)} INR**`;
+        return { ok: true, provider: "exchange-rate-api", text: body };
+      }
+      case "country": {
+        const r = await fetchJson(FREE_API_ENDPOINTS.country(intent.name));
+        if (!r.ok || !Array.isArray(r.data) || !r.data[0]) return { ok: false, error: "Country not found", provider: "rest-countries" };
+        const c = r.data[0];
+        const cap = (c.capital || []).join(", ");
+        const langs = c.languages ? Object.values(c.languages).join(", ") : "";
+        const cur = c.currencies ? Object.entries(c.currencies).map(([k, v]) => `${v.name} (${k})`).join(", ") : "";
+        return {
+          ok: true,
+          provider: "rest-countries",
+          text: `${src("rest-countries")}\n\n## ${c.name?.common || intent.name}\n\n- **Capital:** ${cap}\n- **Region:** ${c.region}\n- **Population:** ${c.population?.toLocaleString?.() || c.population}\n- **Languages:** ${langs}\n- **Currency:** ${cur}`,
+        };
+      }
+      case "joke": {
+        const r = await fetchJson(FREE_API_ENDPOINTS.joke());
+        const joke = r.data?.joke || (r.data?.setup ? `${r.data.setup} — ${r.data.punchline}` : null);
+        if (!joke) return { ok: false, provider: "jokeapi" };
+        return { ok: true, provider: "jokeapi", text: `${src("jokeapi")}\n\n😄 ${joke}` };
+      }
+      case "advice": {
+        const r = await fetchJson(FREE_API_ENDPOINTS.advice());
+        const a = r.data?.slip?.advice;
+        if (!a) return { ok: false, provider: "advice-slip" };
+        return { ok: true, provider: "advice-slip", text: `${src("advice-slip")}\n\n💡 ${a}` };
+      }
+      case "quote": {
+        const r = await fetchJson(FREE_API_ENDPOINTS.quote());
+        const q = Array.isArray(r.data) ? r.data[0] : r.data;
+        if (!q?.q) return { ok: false, provider: "zen-quotes" };
+        return { ok: true, provider: "zen-quotes", text: `${src("zen-quotes")}\n\n> ${q.q}\n\n— **${q.a || "Unknown"}**` };
+      }
+      case "fact": {
+        const r = await fetchJson(FREE_API_ENDPOINTS.fact());
+        const f = r.data?.text;
+        if (!f) return { ok: false, provider: "useless-facts" };
+        return { ok: true, provider: "useless-facts", text: `${src("useless-facts")}\n\n🧠 ${f}` };
+      }
+      case "bored": {
+        const r = await fetchJson(FREE_API_ENDPOINTS.bored());
+        const a = r.data?.activity;
+        if (!a) return { ok: false, provider: "bored-api" };
+        return { ok: true, provider: "bored-api", text: `${src("bored-api")}\n\n🎯 **Try this:** ${a}\n_Type: ${r.data.type || "—"} · participants: ${r.data.participants ?? "—"}_` };
+      }
+      case "trivia": {
+        const r = await fetchJson(FREE_API_ENDPOINTS.trivia());
+        const q = r.data?.results?.[0];
+        if (!q) return { ok: false, provider: "open-trivia" };
+        const decode = (s) => String(s || "").replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+        return {
+          ok: true,
+          provider: "open-trivia",
+          text: `${src("open-trivia")}\n\n**${decode(q.category)}** (${q.difficulty})\n\n${decode(q.question)}\n\n||Answer: ${decode(q.correct_answer)}||`,
+        };
+      }
+      case "catfact": {
+        let r = await fetchJson(FREE_API_ENDPOINTS.catfact());
+        const f = r.data?.fact || (await fetchJson(FREE_API_ENDPOINTS.meow())).data?.data?.[0];
+        if (!f) return { ok: false, provider: "catfact" };
+        return { ok: true, provider: "catfact", text: `_(free API · cat facts)_\n\n🐱 ${f}` };
+      }
+      default:
+        return { ok: false, error: "no intent" };
+    }
+  } catch (e) {
+    return { ok: false, error: e.message || String(e), provider: intent.type };
+  }
+}
+
+/** When LLMs are down, answer from free catalog APIs (no keys). */
+async function tryFreeCatalogChat(userText, fileText) {
+  const raw = String(userText || "");
+  const intent = detectFreeIntent(raw);
+  if (intent.type && intent.type !== "none") {
+    const r = await callFreeCatalogApi(intent);
+    if (r.ok && r.text) {
+      return {
+        mode: "free",
+        provider: r.provider || intent.type,
+        text: r.text,
+        toolTrace: ["free_api:" + (r.provider || intent.type)],
+        orderPayload: null,
+        soft: false,
+        fnCalls: [],
+        sources: [],
+      };
+    }
+  }
+  // Fallback bundle: still give something useful from free APIs
+  try {
+    const [fact, advice, joke] = await Promise.all([
+      callFreeCatalogApi({ type: "fact" }),
+      callFreeCatalogApi({ type: "advice" }),
+      callFreeCatalogApi({ type: "joke" }),
+    ]);
+    const bits = [];
+    bits.push("Gemini/LLM keys limited — **free catalog APIs** se jawab:");
+    bits.push("Sawal type karo jaise: *What is photosynthesis?*, *define enzyme*, *USD to INR*, *translate hello to hindi*, *joke*, *tell me about India*.");
+    if (fact.ok) bits.push(fact.text);
+    return {
+      mode: "free",
+      provider: "free-catalog",
+      text: bits.join("\n\n"),
+      toolTrace: ["free_api:bundle"],
+      orderPayload: null,
+      soft: false,
+      fnCalls: [],
+      sources: [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Unified generate: tries cascade providers automatically on 429 / cooldown.
- * Gemini path supports tools; others get plain chat (+ optional local agent pass first for orders).
+ * Unified generate: key LLMs first, then FREE no-key catalog APIs, then local tools.
  */
 async function generateWithFailover({ contents, tools, toolConfig, userText, fileText }) {
   const auto = state.prefs.autoFailover !== false;
@@ -756,42 +1091,74 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
     }
   }
 
-  // All LLM providers failed — pure local (short UX, no wall of text)
-  setStatus("Local…");
-  state.activeProvider = "local";
+  // LLMs failed → FREE no-key catalog APIs (Wikipedia, Dictionary, Translate, …)
+  setStatus("Free catalog APIs…");
+  state.activeProvider = "free-catalog";
   updateProviderPill();
+
+  // Orders / memory / greetings still via local first when relevant
   const local = await runLocalAgentPass(userText, fileText, { fromFailover: true });
-  const hasBackupKey = CHAT_CASCADE.some((p) => p.kind !== "gemini" && providerKeyOk(p));
-  const cool = coolRemaining("google-gemini") || coolRemaining("gemini");
-  let header = "";
-  if (!local.soft) {
-    if (!hasBackupKey) {
-      header = cool > 0
-        ? `⏳ Gemini limit · retry in **${cool}s**, or add a **Groq** key in Settings for auto-switch.`
-        : `⏳ Chat APIs unavailable right now. Add **Groq** (free) in Settings → public-apis keys.`;
-    } else {
-      header = `⏳ All catalog chat APIs hit a limit. Wait ${cool || 45}s or try again.`;
-    }
+  if (local.orderPayload || (local.toolTrace || []).includes("memory_add") || (local.toolTrace || []).includes("get_datetime")) {
+    return {
+      mode: "local",
+      provider: "local",
+      text: local.text,
+      toolTrace: local.toolTrace || [],
+      orderPayload: local.orderPayload,
+      tried,
+      soft: false,
+      fnCalls: [],
+      sources: [],
+    };
   }
-  const usefulTried = tried.filter((t) => !t.includes("no key"));
-  const detail = (!local.soft && usefulTried.length)
-    ? "\n\n_Tried: " + usefulTried.slice(0, 4).join(" → ") + "_"
-    : "";
-  // soft greetings: only local friendly text, tiny note
-  const text = local.soft
-    ? local.text
-    : [header, local.text].filter(Boolean).join("\n\n") + detail;
+  if (local.soft) {
+    // greeting: still try free tip? keep soft
+    return {
+      mode: "local",
+      provider: "local",
+      text: local.text + "\n\n_Gemini limit pe ho — free APIs chal rahe hain: poochho “What is insulin?”, “define tablet”, “USD to INR”, “joke”._",
+      toolTrace: [],
+      tried,
+      soft: true,
+      fnCalls: [],
+      sources: [],
+    };
+  }
+
+  const free = await tryFreeCatalogChat(userText, fileText);
+  if (free && free.text) {
+    const cool = coolRemaining("google-gemini") || coolRemaining("gemini");
+    const note = cool > 0 ? `\n\n_Gemini cooldown ~${cool}s · free catalog API used (no key)._` : `\n\n_LLM keys limited · answered via **free** public-apis catalog._`;
+    return {
+      mode: "free",
+      provider: free.provider || "free-catalog",
+      text: free.text + note,
+      toolTrace: free.toolTrace || ["free_api"],
+      orderPayload: null,
+      tried,
+      soft: false,
+      fnCalls: [],
+      sources: free.sources || [],
+    };
+  }
+
+  const cool = coolRemaining("google-gemini") || coolRemaining("gemini");
+  const text = [
+    cool > 0 ? `⏳ Gemini limit (~**${cool}s**). Free catalog APIs se match nahi mila.` : `⏳ LLM unavailable.`,
+    local.text,
+    "Try: *What is X?*, *define Y*, *translate …*, *USD to INR*, *joke*, or add **Groq** key.",
+  ].filter(Boolean).join("\n\n");
 
   return {
     mode: "local",
     provider: "local",
     text,
-    toolTrace: local.soft ? [] : (local.toolTrace || []),
+    toolTrace: local.toolTrace || [],
     orderPayload: local.orderPayload,
     tried,
+    soft: false,
     fnCalls: [],
     sources: [],
-    soft: !!local.soft,
   };
 }
 
@@ -1140,6 +1507,24 @@ async function callPublicAiApi(apiId, action, payload = {}) {
     }
     if (api.id === "google-gemini") {
       return { provider: "gemini", note: "Primary chat already uses Gemini key in Settings", model: state.model };
+    }
+
+    // Free catalog helpers via tool
+    const freeIds = {
+      wikipedia: "wikipedia", "free-dictionary": "dictionary", datamuse: "words",
+      "libretranslate": "translate", "jina-reader-free": "jina", "jina-ai": "jina",
+      "exchange-rate-api": "fx", "open-trivia": "trivia", "advice-slip": "advice",
+      jokeapi: "joke", "useless-facts": "fact", "zen-quotes": "quote", "bored-api": "bored",
+      "rest-countries": "country",
+    };
+    if (freeIds[api.id] || api.freeChat) {
+      const intentType = freeIds[api.id] || api.kind || "wikipedia";
+      let intent = { type: intentType === "dictionary" ? "dictionary" : intentType, text, query: text, topic: text, word: (text || "hello").split(/\s+/)[0], name: text, url: payload.url || text, target: payload.target || "hi" };
+      if (intentType === "reader" || api.id.includes("jina")) intent = { type: "jina", url: payload.url || text };
+      if (intentType === "translate") intent = { type: "translate", text: text || "hello", target: payload.target || "hi" };
+      if (intentType === "knowledge" || intentType === "wikipedia") intent = { type: "wikipedia", topic: text || "India" };
+      const r = await callFreeCatalogApi(intent);
+      return r.ok ? r : { error: r.error || "free api failed", provider: api.id };
     }
 
     return {
@@ -1680,14 +2065,14 @@ function renderMessages() {
     box.innerHTML = `
       <div class="welcome-hero">
         <h2>Mohan AI</h2>
-        <p>Auto-switch <b>only</b> among <a href="https://github.com/public-apis/public-apis" target="_blank" rel="noopener">public-apis</a> AI catalog entries on rate-limit.</p>
-        <p class="sm">Master: <b>${state.master.length}</b> · Catalog: <b>${state.aiCatalog.count || "…"}</b> · Failover: <b>${CHAT_CASCADE.map((p)=>p.label).join(" → ") || "…"}</b></p>
-        <p class="sm">Ready now: <b>${listReadyProviders().map((p)=>p.label).join(" / ") || "add keys in Settings"}</b></p>
+        <p>Gemini limit pe bhi chalega — <b>free catalog APIs</b> (Wikipedia, Dictionary, Translate, FX…).</p>
+        <p class="sm">Master: <b>${state.master.length}</b> · Catalog: <b>${state.aiCatalog.count || "…"}</b> · Free APIs: <b>on</b></p>
+        <p class="sm">LLM pool: <b>${listReadyProviders().map((p)=>p.label).join(" / ") || "none — free APIs still work"}</b></p>
         <div class="suggestions">
-          <button type="button" data-s="List AI APIs from the catalog that can do translation">AI APIs: translate</button>
-          <button type="button" data-s="Search the web: latest GST updates India">Web search</button>
+          <button type="button" data-s="What is photosynthesis?">Free: Wikipedia</button>
+          <button type="button" data-s="define enzyme">Free: Dictionary</button>
+          <button type="button" data-s="USD to INR">Free: FX rates</button>
           <button type="button" data-s="Match this order line: CHANDRIKA SOAP 75GM qty 192">Match order</button>
-          <button type="button" data-s="Remember that my preferred output is Code | Qty | PO Name">Save memory</button>
         </div>
       </div>`;
     box.querySelectorAll("[data-s]").forEach((b) => {
@@ -1834,11 +2219,11 @@ async function sendMessage() {
   const files = [...state.pendingFiles];
   if (!text && !files.length) return;
   if (!CHAT_CASCADE.length) await loadAiCatalog();
+  // Free catalog APIs work with zero keys — only nudge settings if user wants LLM
   const hasAnyKey = listReadyProviders().length > 0 || !!state.apiKey || CHAT_CASCADE.some(providerKeyOk);
   if (!hasAnyKey) {
-    openSettings();
-    setStatus("Add a public-apis catalog key (Gemini / Groq / …)");
-    return;
+    // allow send; free path will answer
+    setStatus("Free APIs mode (no LLM keys)");
   }
 
   let chat = getActive();
@@ -1934,7 +2319,12 @@ async function runAssistant() {
       fileText: textBlob,
     });
 
-    if (first.mode === "gemini") {
+    if (first.mode === "free") {
+      usedProvider = first.provider || "free-catalog";
+      text = first.text || "";
+      toolTrace = first.toolTrace || [];
+      orderPayload = first.orderPayload || null;
+    } else if (first.mode === "gemini") {
       let data = first.data;
       usedProvider = "gemini";
       let extracted = extractParts(data);
@@ -2231,7 +2621,8 @@ function openConnectors() {
     { name: "🧠 Long-term Memory", desc: "Facts saved across chats (local)", on: state.prefs.memory },
     { name: "💭 Thinking view", desc: "Show model reasoning when available", on: state.prefs.thinking },
     { name: "🤖 public-apis AI catalog", desc: `${nAi} AI APIs · ${nKeys} extra keys saved`, on: state.prefs.aiApis !== false },
-    { name: "⚡ public-apis auto-switch", desc: "Only catalog AI APIs: " + (CHAT_CASCADE.map((p) => p.label).join(" → ") || "load catalog"), on: state.prefs.autoFailover !== false },
+    { name: "⚡ public-apis auto-switch", desc: "LLM keys → free no-key APIs (Wiki, Dict, Translate…)", on: state.prefs.autoFailover !== false },
+    { name: "🆓 Free catalog APIs", desc: "Wikipedia, Dictionary, LibreTranslate, Jina, FX, jokes — no key", on: true },
     { name: "🔑 Catalog chat keys", desc: `${nKeys} keys · ready ${listReadyProviders().map((p) => p.label).join("/") || "none"}`, on: nKeys > 0 || !!state.apiKey },
     { name: "📄 File upload", desc: "PDF, Excel, images in chat", on: true },
     { name: "📋 Clipboard / Export", desc: "Copy answers & order TSV", on: true },
@@ -2511,7 +2902,10 @@ async function init() {
   const pool = listReadyProviders().map((p) => p.label).join("/");
   setStatus(`Ready · ${state.master.length} SKUs · ${state.aiCatalog.count || 0} AI APIs` + (pool ? ` · ${pool}` : ""));
 
-  if (!state.apiKey && !aiKey("groq") && !aiKey("huggingface") && !aiKey("deepai")) setTimeout(openSettings, 400);
+  // Optional: keys improve quality; free APIs work without
+  if (!state.apiKey && !aiKey("groq") && !aiKey("huggingface") && !aiKey("deepai")) {
+    setStatus("Ready · free catalog APIs (add Gemini/Groq anytime)");
+  }
 
   if ("serviceWorker" in navigator) {
     try { await navigator.serviceWorker.register("./sw.js"); } catch (_) {}
