@@ -10,7 +10,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='12' width='64' height='64' fill='%2310b981'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-size='28' fill='white' font-family='system-ui'%3EM%3C/text%3E%3C/svg%3E" />
   <title>Mohan AI</title>
-  <link rel="stylesheet" href="styles.css?v=20" />
+  <link rel="stylesheet" href="styles.css?v=21" />
 </head>
 <body>
   <div id="app" class="app">
@@ -31,7 +31,7 @@
             <span class="ic">🗑</span><span>Clear</span>
           </button>
         </div>
-        <p class="build">Mohan AI · free chat</p>
+        <p class="build">Mohan AI · free · v21</p>
       </div>
     </aside>
 
@@ -42,7 +42,7 @@
           <span class="logo">M</span>
           <div>
             <h1 id="chatTitle">Mohan AI</h1>
-            <p class="sub" id="chatSub">Real AI · free</p>
+            <p class="sub" id="chatSub">Real AI · free · v21</p>
           </div>
         </div>
         <div class="top-actions">
@@ -83,8 +83,9 @@
       <label class="field">
         <span>Chat engine</span>
         <select id="engineSelect" class="input">
-          <option value="auto">Auto (free first → your keys)</option>
-          <option value="pollinations">Pollinations (free · no key)</option>
+          <option value="auto">Auto (multi free → your keys)</option>
+          <option value="llm7">LLM7 free models (no key)</option>
+          <option value="pollinations">Pollinations (no key)</option>
           <option value="gemini">Google Gemini (free key)</option>
           <option value="groq">Groq (free key)</option>
           <option value="openrouter">OpenRouter free models (free key)</option>
@@ -92,12 +93,12 @@
       </label>
 
       <p class="fineprint">
-        <b>Default free:</b> Pollinations live LLM — no signup, no card.
-        Optional keys only if you want Gemini / Groq / OpenRouter.
+        <b>Zero-key:</b> multi free engines auto-failover (LLM7 + Pollinations) + cooldown wait.
+        Public free quotas can throttle — for <b>almost zero fail</b> add one free key below (30 sec).
       </p>
 
       <label class="field">
-        <span>Gemini API key <small>(optional)</small></span>
+        <span>Gemini API key <small>(recommended free · aistudio)</small></span>
         <div class="row">
           <input type="password" id="geminiKey" class="input" placeholder="AIza…" autocomplete="off" />
           <button type="button" class="btn ghost sm" data-toggle="geminiKey">Show</button>
@@ -135,6 +136,6 @@
   <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="app.js?v=20" type="module"></script>
+  <script src="app.js?v=21" type="module"></script>
 </body>
 </html>

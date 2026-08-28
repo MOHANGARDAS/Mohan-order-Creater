@@ -1,16 +1,19 @@
 # Mohan AI
 
-Simple **real AI chatbot** (not order tools / fixed FAQ).
+Normal **real AI chatbot** (live LLM every turn — not order tools / fixed FAQ).
 
-## Free engines (built-in)
+## Free engines
 
-| Engine | Key? | Notes |
-|--------|------|--------|
-| **Pollinations** | No | Default live LLM, CORS OK |
-| **Groq** | Free key | Fast Llama |
-| **Gemini** | Free key | Google AI Studio |
-| **OpenRouter** | Free key | `:free` models |
+| Engine | Key | Role |
+|--------|-----|------|
+| LLM7 (Llama / Mistral / Codestral / GPT-OSS / MiniMax) | No | Primary free pool |
+| Pollinations | No | Extra free fallback |
+| Groq | Free key | Fast optional |
+| Gemini | Free key | Recommended optional |
+| OpenRouter `:free` | Free key | Optional |
 
-Live: GitHub Pages on this repo.
+**Auto mode:** rotates free engines → cooldown-aware retry → optional keys.
 
-Keys stay in browser `localStorage` only.
+Keys stay in browser `localStorage` only (never in repo).
+
+Live: GitHub Pages on this repo (`?v=21`).
