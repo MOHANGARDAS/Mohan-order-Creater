@@ -1,6 +1,6 @@
 /**
- * Mohan AI v17 — never show raw Gemini 429 to user
- * Cooldown → free catalog / local order match (PDF OK). No error spam.
+ * Mohan AI v18 — FULL public-apis catalog (1700+ APIs, all categories)
+ * Free no-key handlers + LLM failover. Paginated API browser.
  */
 
 const STORAGE = {
@@ -12,7 +12,7 @@ const STORAGE = {
   memory: "moc_memory_v10",
   master: "moc_master_v1",
   rules: "moc_rules_v1",
-  prefs: "moc_prefs_v16",
+  prefs: "moc_prefs_v18",
   aiKeys: "moc_ai_keys_v11",
   providerCool: "moc_provider_cool_v16",
 };
@@ -161,6 +161,7 @@ const state = {
   aiKeys: loadJSON(STORAGE.aiKeys, {}),
   providerCool: loadJSON(STORAGE.providerCool, {}),
   aiCatalog: { apis: [], count: 0, source: "", loaded: false },
+  aiCatalogPage: 0,
   master: [],
   brandIndex: new Map(),
   activeId: null,
@@ -980,6 +981,44 @@ async function callFreeCatalogApi(intent) {
         if (!f) return { ok: false, provider: "catfact" };
         return { ok: true, provider: "catfact", text: `_(free API · cat facts)_\n\n🐱 ${f}` };
       }
+      case "weather": {
+        // Open-Meteo: geocode via open-meteo geo then forecast
+        const place = intent.place || intent.query || "Kolhapur";
+        const g = await fetchJson(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(place)}&count=1`);
+        const loc = g.data?.results?.[0];
+        if (!loc) return { ok: false, error: "Place not found", provider: "open-meteo" };
+        const w = await fetchJson(`https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m`);
+        const c = w.data?.current || {};
+        return {
+          ok: true,
+          provider: "open-meteo",
+          text: `_(free API · open-meteo)_\n\n## Weather · ${loc.name}${loc.admin1 ? ", " + loc.admin1 : ""}\n\n- **Temp:** ${c.temperature_2m}°C\n- **Humidity:** ${c.relative_humidity_2m}%\n- **Wind:** ${c.wind_speed_10m} km/h`,
+        };
+      }
+      case "pokemon": {
+        const name = (intent.name || intent.query || "pikachu").toLowerCase().trim();
+        const r = await fetchJson(`https://pokeapi.co/api/v2/pokemon/${encodeURIComponent(name)}`);
+        if (!r.ok || !r.data) return { ok: false, provider: "pokeapi" };
+        const d = r.data;
+        return {
+          ok: true,
+          provider: "pokeapi",
+          text: `_(free API · pokeapi)_\n\n## ${d.name} #${d.id}\n\n- **Height:** ${d.height}\n- **Weight:** ${d.weight}\n- **Types:** ${(d.types || []).map((t) => t.type?.name).join(", ")}`,
+        };
+      }
+      case "ip": {
+        const r = await fetchJson("https://api.ipify.org?format=json");
+        return { ok: true, provider: "ipify", text: `_(free API · ipify)_\n\nYour public IP: **${r.data?.ip || "?"}**` };
+      }
+      case "agify": {
+        const name = intent.name || "mohan";
+        const r = await fetchJson(`https://api.agify.io?name=${encodeURIComponent(name)}`);
+        return { ok: true, provider: "agify", text: `_(free API · agify)_\n\nName **${name}** → estimated age **${r.data?.age ?? "?"}** (n=${r.data?.count ?? "?"})` };
+      }
+      case "dog": {
+        const r = await fetchJson("https://dog.ceo/api/breeds/image/random");
+        return { ok: true, provider: "dog-api", text: `_(free API · dog.ceo)_\n\n![dog](${r.data?.message || ""})` };
+      }
       default:
         return { ok: false, error: "no intent" };
     }
@@ -1240,13 +1279,16 @@ async function loadAiCatalog() {
       apis: data.apis || [],
       count: data.count || (data.apis || []).length,
       source: data.source || "https://github.com/public-apis/public-apis",
-      failoverChain: data.failover?.chain || [],
+      failoverChain: data.failover?.chain || data.failover?.chain_llm || [],
+      freeChain: data.failover?.chain_free || [],
+      stats: data.stats || {},
+      categories: data.sections || [...new Set((data.apis || []).map((a) => a.category))].sort(),
       loaded: true,
     };
     rebuildChatCascadeFromCatalog();
   } catch (e) {
     console.warn("AI catalog load failed", e);
-    state.aiCatalog = { apis: [], count: 0, source: "", loaded: true, error: e.message };
+    state.aiCatalog = { apis: [], count: 0, source: "", loaded: true, error: e.message, categories: [] };
     rebuildChatCascadeFromCatalog();
   }
   return state.aiCatalog;
@@ -1571,8 +1613,10 @@ async function callPublicAiApi(apiId, action, payload = {}) {
       wikipedia: "wikipedia", "free-dictionary": "dictionary", datamuse: "words",
       "libretranslate": "translate", "jina-reader-free": "jina", "jina-ai": "jina",
       "exchange-rate-api": "fx", "open-trivia": "trivia", "advice-slip": "advice",
-      jokeapi: "joke", "useless-facts": "fact", "zen-quotes": "quote", "bored-api": "bored",
-      "rest-countries": "country",
+      jokeapi: "joke", "jokeapi-2": "joke", "official-joke-api": "joke",
+      "useless-facts": "fact", "zen-quotes": "quote", "bored-api": "bored",
+      "rest-countries": "country", "open-meteo": "weather", pokeapi: "pokemon",
+      ipify: "ip", agify: "agify", "dog-api": "dog", "cat-facts": "catfact",
     };
     if (freeIds[api.id] || api.freeChat) {
       const intentType = freeIds[api.id] || api.kind || "wikipedia";
@@ -1852,7 +1896,7 @@ async function runTool(name, args) {
       const tag = normalize(args.tag || "");
       const cat = normalize(args.category || "");
       const only = !!args.callable_only;
-      const limit = Math.min(Number(args.limit) || 25, 62);
+      const limit = Math.min(Number(args.limit) || 40, 100);
       let list = state.aiCatalog.apis || [];
       if (q) list = list.filter((a) => normalize(a.name + " " + a.description + " " + a.id).includes(q));
       if (tag) list = list.filter((a) => (a.tags || []).map(normalize).includes(tag));
@@ -2126,7 +2170,7 @@ function renderMessages() {
       <div class="welcome-hero">
         <h2>Mohan AI</h2>
         <p>Gemini limit pe bhi chalega — <b>free catalog APIs</b> (Wikipedia, Dictionary, Translate, FX…).</p>
-        <p class="sm">Master: <b>${state.master.length}</b> · Catalog: <b>${state.aiCatalog.count || "…"}</b> · Free APIs: <b>on</b></p>
+        <p class="sm">Master: <b>${state.master.length}</b> · Catalog: <b>${(state.aiCatalog.count || 0).toLocaleString() || "…"}</b> APIs · Free handlers: <b>on</b></p>
         <p class="sm">LLM pool: <b>${listReadyProviders().map((p)=>p.label).join(" / ") || "none — free APIs still work"}</b></p>
         <div class="suggestions">
           <button type="button" data-s="What is photosynthesis?">Free: Wikipedia</button>
@@ -2605,16 +2649,23 @@ function openSettings() {
 }
 function openAiApis() {
   loadAiCatalog().then(() => {
-    const cats = [...new Set((state.aiCatalog.apis || []).map((a) => a.category))].sort();
+    const cats = state.aiCatalog.categories?.length
+      ? state.aiCatalog.categories
+      : [...new Set((state.aiCatalog.apis || []).map((a) => a.category))].sort();
     const sel = $("aiApiCat");
-    if (sel && sel.options.length <= 1) {
+    if (sel) {
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">All categories (' + cats.length + ')</option>';
       cats.forEach((c) => {
         const o = document.createElement("option");
         o.value = c;
-        o.textContent = c;
+        const n = (state.aiCatalog.apis || []).filter((a) => a.category === c).length;
+        o.textContent = c + " (" + n + ")";
         sel.appendChild(o);
       });
+      if (cur) sel.value = cur;
     }
+    state.aiCatalogPage = 0;
     renderAiApiList();
     $("aiApisModal").classList.remove("hidden");
   });
@@ -2624,52 +2675,89 @@ function renderAiApiList() {
   const cat = $("aiApiCat")?.value || "";
   const tag = $("aiApiTag")?.value || "";
   const only = !!$("aiApiCallableOnly")?.checked;
+  const freeOnly = !!$("aiApiFreeOnly")?.checked;
   let list = state.aiCatalog.apis || [];
-  if (q) list = list.filter((a) => normalize(a.name + " " + a.description + " " + (a.tags || []).join(" ")).includes(q));
+  if (q) {
+    const tokens = q.split(/\s+/).filter(Boolean);
+    list = list.filter((a) => {
+      const hay = normalize(a.name + " " + a.description + " " + a.id + " " + (a.category || "") + " " + (a.tags || []).join(" "));
+      return tokens.every((t) => hay.includes(t));
+    });
+  }
   if (cat) list = list.filter((a) => a.category === cat);
-  if (tag) list = list.filter((a) => (a.tags || []).includes(tag));
+  if (tag) list = list.filter((a) => (a.tags || []).includes(tag) || (tag === "free" && (a.auth === "No" || a.freeChat)));
   if (only) list = list.filter((a) => a.callable);
-  $("aiApiCount").textContent = `${list.length} / ${state.aiCatalog.count || 0} APIs · source public-apis`;
+  if (freeOnly) list = list.filter((a) => a.auth === "No" || a.freeChat);
+  list = [...list].sort((a, b) => {
+    const sa = (a.freeChat ? 4 : 0) + (a.callable ? 2 : 0) + (a.failover ? 1 : 0);
+    const sb = (b.freeChat ? 4 : 0) + (b.callable ? 2 : 0) + (b.failover ? 1 : 0);
+    return sb - sa || String(a.name).localeCompare(String(b.name));
+  });
+  const pageSize = 48;
+  const page = Math.max(0, Number(state.aiCatalogPage) || 0);
+  const pages = Math.max(1, Math.ceil(list.length / pageSize) || 1);
+  const safePage = Math.min(page, pages - 1);
+  state.aiCatalogPage = safePage;
+  const slice = list.slice(safePage * pageSize, safePage * pageSize + pageSize);
+  const st = state.aiCatalog.stats || {};
+  $("aiApiCount").textContent =
+    `${list.length.toLocaleString()} match · page ${safePage + 1}/${pages} · total catalog ${(state.aiCatalog.count || 0).toLocaleString()} · no-auth ${st.no_auth ?? "—"} · public-apis`;
   const box = $("aiApiList");
-  box.innerHTML = list
+  const pager = `<div class="ai-pager" style="grid-column:1/-1;display:flex;gap:8px;align-items:center;margin:4px 0 10px;flex-wrap:wrap">
+    <button type="button" class="btn sm" data-pg="prev" ${safePage <= 0 ? "disabled" : ""}>← Prev</button>
+    <span class="muted sm">Page ${safePage + 1} / ${pages}</span>
+    <button type="button" class="btn sm" data-pg="next" ${safePage >= pages - 1 ? "disabled" : ""}>Next →</button>
+  </div>`;
+  box.innerHTML = pager + slice
     .map((a) => {
-      const tags = (a.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
+      const tags = (a.tags || []).slice(0, 4).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
       const authTag =
         a.auth === "No"
           ? `<span class="tag free">No auth</span>`
-          : `<span class="tag auth">${escapeHtml(a.auth)}</span>`;
+          : `<span class="tag auth">${escapeHtml(String(a.auth || "key"))}</span>`;
       const callTag = a.callable ? `<span class="tag call">Callable</span>` : "";
-      const failTag = a.failover ? `<span class="tag call">Auto-switch</span>` : "";
+      const failTag = a.failover || a.freeChat ? `<span class="tag call">Auto</span>` : "";
       const hasKey = a.keyField === "gemini" ? !!state.apiKey : (a.keyField && aiKey(a.keyField));
       return `<div class="ai-api-card" data-id="${escapeHtml(a.id)}">
         <h3>${escapeHtml(a.name)}</h3>
-        <p class="desc">${escapeHtml(a.description)}</p>
-        <div class="meta">${authTag}${callTag}${failTag}${tags}<span class="tag">${escapeHtml(a.category)}</span></div>
+        <p class="desc">${escapeHtml(a.description || "")}</p>
+        <div class="meta">${authTag}${callTag}${failTag}${tags}<span class="tag">${escapeHtml(a.category || "")}</span></div>
         <div class="actions">
           <a class="btn sm ghost" href="${escapeHtml(a.url)}" target="_blank" rel="noopener">Docs</a>
           ${
-            a.callable
-              ? `<button type="button" class="btn sm primary" data-try="${escapeHtml(a.id)}">${hasKey || a.auth === "No" ? "Try in chat" : "Add key"}</button>`
-              : `<button type="button" class="btn sm" data-try="${escapeHtml(a.id)}">Ask about</button>`
+            a.callable || a.freeChat
+              ? `<button type="button" class="btn sm primary" data-try="${escapeHtml(a.id)}">${hasKey || a.auth === "No" || a.freeChat ? "Try" : "Add key"}</button>`
+              : `<button type="button" class="btn sm" data-try="${escapeHtml(a.id)}">Info</button>`
           }
         </div>
       </div>`;
     })
     .join("");
+  box.querySelectorAll("[data-pg]").forEach((btn) => {
+    btn.onclick = () => {
+      const a = btn.dataset.pg;
+      if (a === "prev") state.aiCatalogPage = Math.max(0, (state.aiCatalogPage || 0) - 1);
+      else if (a === "next") state.aiCatalogPage = (state.aiCatalogPage || 0) + 1;
+      else state.aiCatalogPage = 0;
+      renderAiApiList();
+    };
+  });
   box.querySelectorAll("[data-try]").forEach((btn) => {
     btn.onclick = () => {
       const id = btn.dataset.try;
       const a = findAiApi(id);
       $("aiApisModal").classList.add("hidden");
-      if (a?.callable && a.keyField && !aiKey(a.keyField) && a.auth !== "No") {
+      if (a?.callable && a.keyField && a.keyField !== "gemini" && !aiKey(a.keyField) && a.auth !== "No" && !a.freeChat) {
         openSettings();
-        setStatus("Add " + (a.keyField) + " key");
+        setStatus("Add " + a.keyField + " key");
         return;
       }
-      if (a?.callable) {
-        $("msgInput").value = `Call AI API "${a.name}" (id: ${a.id}): `;
+      if (a?.callable || a?.freeChat) {
+        $("msgInput").value = a.freeChat || a.auth === "No"
+          ? `Use free API ${a.name}: `
+          : `Call AI API "${a.name}" (id: ${a.id}): `;
       } else {
-        $("msgInput").value = `Tell me about the AI API "${a?.name || id}" from the catalog and how to use it.`;
+        $("msgInput").value = `Open docs / explain API "${a?.name || id}" (${a?.category || ""}) from public-apis catalog.`;
       }
       $("msgInput").focus();
     };
@@ -2705,7 +2793,7 @@ function openConnectors() {
     { name: "📦 Order / Master Match", desc: "Fuzzy match PO lines to material codes", on: state.prefs.orders },
     { name: "🧠 Long-term Memory", desc: "Facts saved across chats (local)", on: state.prefs.memory },
     { name: "💭 Thinking view", desc: "Show model reasoning when available", on: state.prefs.thinking },
-    { name: "🤖 public-apis AI catalog", desc: `${nAi} AI APIs · ${nKeys} extra keys saved`, on: state.prefs.aiApis !== false },
+    { name: "🤖 public-apis FULL catalog", desc: `${(nAi || 0).toLocaleString()} APIs · all categories · ${nKeys} keys`, on: state.prefs.aiApis !== false },
     { name: "⚡ public-apis auto-switch", desc: "LLM keys → free no-key APIs (Wiki, Dict, Translate…)", on: state.prefs.autoFailover !== false },
     { name: "🆓 Free catalog APIs", desc: "Wikipedia, Dictionary, LibreTranslate, Jina, FX, jokes — no key", on: true },
     { name: "🔑 Catalog chat keys", desc: `${nKeys} keys · ready ${listReadyProviders().map((p) => p.label).join("/") || "none"}`, on: nKeys > 0 || !!state.apiKey },
@@ -2793,10 +2881,11 @@ function bind() {
     updateProviderPill();
   });
   ["aiApiSearch", "aiApiCat", "aiApiTag"].forEach((id) => {
-    $(id)?.addEventListener("input", renderAiApiList);
-    $(id)?.addEventListener("change", renderAiApiList);
+    $(id)?.addEventListener("input", () => { state.aiCatalogPage = 0; renderAiApiList(); });
+    $(id)?.addEventListener("change", () => { state.aiCatalogPage = 0; renderAiApiList(); });
   });
-  $("aiApiCallableOnly")?.addEventListener("change", renderAiApiList);
+  $("aiApiCallableOnly")?.addEventListener("change", () => { state.aiCatalogPage = 0; renderAiApiList(); });
+  $("aiApiFreeOnly")?.addEventListener("change", () => { state.aiCatalogPage = 0; renderAiApiList(); });
   $("btnToggleKey").onclick = () => {
     const i = $("apiKeyInput");
     i.type = i.type === "password" ? "text" : "password";
