@@ -1,4 +1,4 @@
-const CACHE = "mohan-ai-v16";
+const CACHE = "mohan-ai-v17";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./master.json", "./ai_apis.json", "./manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

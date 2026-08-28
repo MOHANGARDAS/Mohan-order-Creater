@@ -1,7 +1,6 @@
 /**
- * Mohan AI v16 — free catalog APIs work without Gemini keys
- * public-apis + free no-key: Wikipedia, Dictionary, Translate, Jina, FX, jokes…
- * Key LLMs first; on 429 auto-route to free catalog endpoints
+ * Mohan AI v17 — never show raw Gemini 429 to user
+ * Cooldown → free catalog / local order match (PDF OK). No error spam.
  */
 
 const STORAGE = {
@@ -476,6 +475,52 @@ function localToolsHint() {
   if (state.prefs.aiApis !== false) bits.push("AI catalog tools");
   return bits.join(", ");
 }
+
+/** Pull product-ish lines from messy PDF/PO text for local match. */
+function extractOrderLinesFromText(raw) {
+  const text = String(raw || "");
+  const lines = [];
+  const seen = new Set();
+  const push = (name, pack, qty) => {
+    name = String(name || "").replace(/\s+/g, " ").trim();
+    pack = String(pack || "").replace(/\s+/g, " ").trim();
+    const q = Number(qty);
+    if (!name || name.length < 3 || !Number.isFinite(q) || q <= 0) return;
+    // skip headers
+    if (/^(sr|s\.?no|code|material|product|qty|quantity|pack|rate|amount|total|description)\b/i.test(name)) return;
+    if (/^\d+$/.test(name)) return;
+    const key = normalize(name) + "|" + normalize(pack) + "|" + q;
+    if (seen.has(key)) return;
+    seen.add(key);
+    lines.push({ po_name: name, pack, qty: q });
+  };
+
+  // Pattern: NAME ... PACK ... QTY  OR  NAME QTY
+  for (const row of text.split(/\r?\n|;|\t/)) {
+    let r = row.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+    if (r.length < 4 || r.length > 120) continue;
+    // NAME 75GM 192
+    let m = r.match(/^(.+?)\s+(\d+\s*(?:GM|ML|MG|TAB|TABS|KG|LTR|NOS|PCS|STRIP|s)?)\s+(\d{1,6})\s*$/i);
+    if (m) { push(m[1], m[2], m[3]); continue; }
+    // NAME x 192 or NAME 192
+    m = r.match(/^([A-Za-z][A-Za-z0-9 .%\/\-]{2,70}?)\s+[xX×]?\s*(\d{1,6})\s*(?:nos|pcs|qty)?\s*$/);
+    if (m) { push(m[1], "", m[2]); continue; }
+    // trailing qty after long name
+    m = r.match(/^(.+?)\s+(\d{1,5})\s*$/);
+    if (m && /[A-Za-z]{3}/.test(m[1]) && Number(m[2]) < 100000) {
+      const nm = m[1].replace(/\d{6,}/g, "").trim(); // strip codes
+      if (nm.length >= 3) push(nm, "", m[2]);
+    }
+  }
+
+  // Inline "Product 10TAB qty 20"
+  const reInline = /([A-Za-z][A-Za-z0-9 .%\/\-]{2,50}?)\s+(\d+\s*(?:GM|ML|TAB|TABS|MG)?)\s+(?:qty|quantity|x)?\s*(\d{1,6})/gi;
+  let im;
+  while ((im = reInline.exec(text)) && lines.length < 50) push(im[1], im[2], im[3]);
+
+  return lines.slice(0, 40);
+}
+
 async function runLocalAgentPass(userText, fileText, opts = {}) {
   const t = String(userText || "");
   const blob = String(fileText || "");
@@ -490,20 +535,13 @@ async function runLocalAgentPass(userText, fileText, opts = {}) {
   const isGreeting = /^(hi|hii|hello|hey|yo|sup|hola|namaste|namaskar|good\s*(morning|evening|afternoon)|gm|gn|ok|okay|thanks|thank\s*you|thx|bye|test|ping)\.?$/i.test(lower)
     || (lower.length <= 12 && /^(hi|hello|hey)\b/.test(lower));
 
-  // Order-ish: extract simple lines "NAME qty N" or table-ish
-  const orderish = /\b(order|po\b|match|qty|quantity|material|chandrika|alaspan|benadon)\b/i.test(combined)
-    || (/\d+\s*(tab|gm|ml|pcs|nos)?/i.test(combined) && /[A-Za-z]{3,}/.test(combined) && combined.length > 8);
-  if (state.prefs.orders !== false && (orderish || blob) && !isGreeting) {
-    const lines = [];
-    const re = /^\s*([A-Za-z][A-Za-z0-9 .%\-/]{2,80}?)\s+(?:x\s*)?(\d{1,6})(?:\s*(?:tab|tabs|gm|ml|pcs|nos|qty)?)?\s*$/gim;
-    let m;
-    while ((m = re.exec(combined)) && lines.length < 40) {
-      lines.push({ po_name: m[1].trim(), pack: "", qty: Number(m[2]) });
-    }
-    const re2 = /^\s*([A-Za-z][A-Za-z0-9 .%\-/]{2,60}?)\s+(\d+\s*(?:GM|ML|TAB|TABS|MG)?)\s+(\d{1,6})\s*$/gim;
-    while ((m = re2.exec(combined)) && lines.length < 40) {
-      lines.push({ po_name: m[1].trim(), pack: m[2].trim(), qty: Number(m[3]) });
-    }
+  // Order-ish / PDF attachment — always try local master match (no Gemini needed)
+  const hasFile = blob.length > 20;
+  const orderish = /\b(order|po\b|match|qty|quantity|material|chandrika|alaspan|benadon|purchase)\b/i.test(combined)
+    || (/\d+\s*(tab|gm|ml|pcs|nos)?/i.test(combined) && /[A-Za-z]{3,}/.test(combined) && combined.length > 8)
+    || hasFile;
+  if (state.prefs.orders !== false && orderish && !isGreeting) {
+    let lines = extractOrderLinesFromText(combined);
     if (!lines.length && /chandrika|alaspan|benadon/i.test(combined)) {
       if (/chandrika/i.test(combined)) lines.push({ po_name: "CHANDRIKA SOAP", pack: "75GM", qty: 192 });
       if (/alaspan/i.test(combined) && /tab/i.test(combined)) lines.push({ po_name: "ALASPAN TAB", pack: "10TAB", qty: 10 });
@@ -513,12 +551,15 @@ async function runLocalAgentPass(userText, fileText, opts = {}) {
       toolTrace.push("match_order_lines");
       const result = await runTool("match_order_lines", { lines });
       orderPayload = { rows: result.rows };
-      parts.push("**Order match** (local · codes only from master/rules):");
+      parts.push("**Order match** (local · no Gemini needed · master/rules only):");
       parts.push("| Code | Qty | PO Name | Pack | Status | Conf |");
       parts.push("|---|---:|---|---|---|---:|");
       for (const r of result.rows) {
         parts.push(`| ${r.code || "—"} | ${r.qty ?? ""} | ${r.po_name || ""} | ${r.pack || ""} | ${r.status} | ${r.conf ?? 0}% |`);
       }
+    } else if (hasFile) {
+      parts.push("PDF/text se clear product lines nahi milin. Gemini limit pe AI parse band hai.");
+      parts.push("Lines bhejo format me: `PRODUCT NAME 75GM 192` — local match turant chalega.");
     }
   }
 
@@ -1002,10 +1043,27 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
   let lastErr = null;
 
   if (!CHAT_CASCADE.length) rebuildChatCascadeFromCatalog();
+
+  // Fast path: attachment / order text while LLMs limited → local match first
+  const earlyLocal = await runLocalAgentPass(userText, fileText, { fromFailover: true });
+  const llmsReady = CHAT_CASCADE.some(providerReady);
+  if (!llmsReady && earlyLocal.orderPayload) {
+    return {
+      mode: "local",
+      provider: "local",
+      text: earlyLocal.text,
+      toolTrace: earlyLocal.toolTrace || [],
+      orderPayload: earlyLocal.orderPayload,
+      tried: ["local-order-first"],
+      soft: false,
+      fnCalls: [],
+      sources: [],
+    };
+  }
+
   const chain = auto
     ? CHAT_CASCADE.slice()
     : CHAT_CASCADE.filter((p) => p.id === "google-gemini" || p.kind === "gemini");
-  // If gemini cooling and auto, still skip to next
   for (const p of chain) {
     if (!providerReady(p)) {
       if (isProviderCool(p.id)) tried.push(p.id + "(cool " + coolRemaining(p.id) + "s)");
@@ -1078,16 +1136,15 @@ async function generateWithFailover({ contents, tools, toolConfig, userText, fil
     } catch (err) {
       lastErr = err;
       const code = err.code || err.status;
-      errors.push(p.id + ": " + (err.message || String(err)));
-      tried.push(p.id + "(fail)");
+      const silent = err.silent || err.message === "GEMINI_COOLDOWN" || err.message === "GEMINI_429";
+      if (!silent) errors.push(p.id + ": " + (err.message || String(err)));
+      tried.push(p.id + (code === 429 ? "(limit)" : "(fail)"));
       if (code === 429 || code === "429") {
         markProviderCool(p.id);
-        continue; // next provider
+        continue;
       }
-      // auth / hard fail — try next if auto
-      if (auto && (code === 401 || code === 403 || code === "nokey")) continue;
-      if (auto) continue;
-      throw err;
+      // Always try next / free path — never dump raw API errors on user
+      continue;
     }
   }
 
@@ -1841,9 +1898,11 @@ async function runTool(name, args) {
 /* ---------------- Gemini API ---------------- */
 async function geminiGenerate({ contents, tools, toolConfig }) {
   if (isProviderCool("google-gemini") || (state.apiCoolUntil && Date.now() < state.apiCoolUntil)) {
-    const sec = coolRemaining("google-gemini") || Math.ceil((state.apiCoolUntil - Date.now()) / 1000);
-    const e = new Error(`Gemini cooldown ${sec}s (free tier). Auto-switch will try backup APIs.`);
+    const sec = coolRemaining("google-gemini") || Math.ceil(((state.apiCoolUntil || 0) - Date.now()) / 1000);
+    const e = new Error("GEMINI_COOLDOWN");
     e.code = 429;
+    e.silent = true;
+    e.coolSec = sec;
     throw e;
   }
   let model = resolveModel(state.model);
@@ -1907,8 +1966,9 @@ async function geminiGenerate({ contents, tools, toolConfig }) {
     const msg = data?.error?.message || res.statusText;
     if (res.status === 429) {
       markProviderCool("google-gemini");
-      const e = new Error("Gemini API limit (429). Switching to backup provider if keys available…");
+      const e = new Error("GEMINI_429");
       e.code = 429;
+      e.silent = true;
       throw e;
     }
     throw new Error(msg || "Gemini failed");
@@ -2268,6 +2328,7 @@ async function runAssistant() {
     const files = chat._turnFiles || [];
     chat._turnFiles = [];
     const { parts: fileParts, textBlob } = await filesToParts(files);
+    chat._lastFileText = textBlob || "";
 
     // Build contents from history
     const contents = [];
@@ -2436,41 +2497,65 @@ async function runAssistant() {
   } catch (err) {
     console.error(err);
     removeTyping();
-    // Last-ditch local if rate limit
-    if (err.code === 429 || /429|rate limit|cooldown/i.test(err.message || "")) {
-      try {
-        const chat2 = getActive();
-        const lastU = [...(chat2?.messages || [])].reverse().find((m) => m.role === "user");
-        const local = await runLocalAgentPass(lastU?.text || "", "", { fromFailover: true });
-        const botMsg = {
-          id: uid(),
-          role: "model",
-          text: local.text || err.message,
-          tools: local.soft ? undefined : (local.toolTrace?.length ? local.toolTrace : undefined),
-          order: local.orderPayload || undefined,
-          provider: "local",
-          soft: local.soft || undefined,
-          ts: Date.now(),
-        };
-        chat2?.messages.push(botMsg);
-        saveChats();
-        $("messages").appendChild(renderMsg(botMsg));
-        state.activeProvider = "local";
-        updateProviderPill();
-        setStatus("Limited · local tools");
-        return;
-      } catch (_) {}
+    try {
+      const chat2 = getActive();
+      const lastU = [...(chat2?.messages || [])].reverse().find((m) => m.role === "user");
+      const uText = lastU?.text || "";
+      // Prefer free catalog + local — NEVER surface raw 429 text
+      let text = "";
+      let orderPayload = null;
+      let toolTrace = [];
+      let provider = "local";
+      let soft = false;
+
+      const local = await runLocalAgentPass(uText, chat2?._lastFileText || "", { fromFailover: true });
+      if (local.orderPayload) {
+        text = local.text;
+        orderPayload = local.orderPayload;
+        toolTrace = local.toolTrace || [];
+      } else {
+        const free = await tryFreeCatalogChat(uText, chat2?._lastFileText || "");
+        if (free?.text) {
+          text = free.text;
+          toolTrace = free.toolTrace || [];
+          provider = free.provider || "free-catalog";
+        } else {
+          text = local.text || "Gemini free limit pe hai. Free APIs: *What is X?*, *define Y*, *USD to INR*, *joke*. Orders: `NAME 75GM 192`.";
+          soft = !!local.soft;
+          toolTrace = local.toolTrace || [];
+        }
+      }
+
+      const botMsg = {
+        id: uid(),
+        role: "model",
+        text,
+        tools: soft ? undefined : (toolTrace.length ? toolTrace : undefined),
+        order: orderPayload || undefined,
+        provider,
+        soft: soft || undefined,
+        ts: Date.now(),
+      };
+      chat2?.messages.push(botMsg);
+      saveChats();
+      $("messages").appendChild(renderMsg(botMsg));
+      state.activeProvider = provider;
+      updateProviderPill();
+      setStatus(coolStatusHint());
+    } catch (e2) {
+      console.error(e2);
+      const botMsg = {
+        id: uid(),
+        role: "model",
+        text: "Gemini busy hai. Settings me **Groq** key add karo, ya *What is insulin?* / order lines try karo.",
+        ts: Date.now(),
+        soft: true,
+      };
+      getActive()?.messages.push(botMsg);
+      saveChats();
+      $("messages").appendChild(renderMsg(botMsg));
+      setStatus("Limited");
     }
-    const botMsg = {
-      id: uid(),
-      role: "model",
-      text: "⚠️ **Error:** " + (err.message || String(err)),
-      ts: Date.now(),
-    };
-    getActive()?.messages.push(botMsg);
-    saveChats();
-    $("messages").appendChild(renderMsg(botMsg));
-    setStatus("Error");
   } finally {
     state.busy = false;
     $("btnSend").disabled = false;
