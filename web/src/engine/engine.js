@@ -14,7 +14,7 @@ import {
 
 const LS_KEY = 'mohan.engine.v2';
 const MAX_WAIT_MS = 40_000; // wait up to this long for a slot to cool down before giving up
-const MAX_ATTEMPTS = 9;
+const MAX_ATTEMPTS = 12;
 
 let slots = [];
 let ready = false;
@@ -47,36 +47,52 @@ function emitHealth() {
 }
 
 function baseSlots() {
+  // v2 STRONG STACK — frontier-class models first (baked-in so they exist even
+  // if discovery is slow); gpt-4o-mini demoted to speed fallback. Baked puter
+  // slots that discovery can't confirm get dropped in ensureReady().
   return [
-    createSlot({ id: 'puter:gpt-4o-mini', provider: 'puter', carrier: 'puter', model: 'gpt-4o-mini', label: 'Puter · GPT-4o mini', tier: 1, minIntervalMs: 3000 }),
-    createSlot({ id: 'popenai:openai-fast', provider: 'pollinations', carrier: 'popenai', model: 'openai-fast', label: 'Pollinations · openai-fast', tier: 2, minIntervalMs: 6000 }),
+    createSlot({ id: 'puter:claude-sonnet-4', provider: 'puter', carrier: 'puter', model: 'claude-sonnet-4', label: 'Puter · Claude Sonnet 4', tier: 1, minIntervalMs: 3000 }),
+    createSlot({ id: 'puter:gpt-4.1', provider: 'puter', carrier: 'puter', model: 'gpt-4.1', label: 'Puter · GPT-4.1', tier: 1, minIntervalMs: 3000 }),
+    createSlot({ id: 'puter:gemini-2.5-flash', provider: 'puter', carrier: 'puter', model: 'gemini-2.5-flash', label: 'Puter · Gemini 2.5 Flash', tier: 2, minIntervalMs: 3000 }),
+    createSlot({ id: 'puter:gpt-4o-mini', provider: 'puter', carrier: 'puter', model: 'gpt-4o-mini', label: 'Puter · GPT-4o mini (speed)', tier: 3, minIntervalMs: 3000 }),
+    createSlot({ id: 'popenai:openai-fast', provider: 'pollinations', carrier: 'popenai', model: 'openai-fast', label: 'Pollinations · openai-fast (reasoning)', tier: 2, minIntervalMs: 6000 }),
     createSlot({ id: 'legacyget:openai-fast', provider: 'pollinations', carrier: 'legacyget', model: 'openai-fast', label: 'Pollinations · simple', tier: 6, minIntervalMs: 12000 }),
   ];
 }
 
 const GEN_EXCLUDE = /(image|img|audio|tts|whisper|embed|video|veo|seedream|flux|dall|vision|moderation|realtime)/i;
-function shortlistGenModels(models) {
-  const prefs = [/gpt/i, /claude/i, /llama/i, /deepseek/i, /gemini|gemma/i, /mistral|mixtral/i, /qwen/i];
+export function shortlistGenModels(models) {
+  // strong-first: grok / qwen-max / glm / deepseek / gemma / llama / mistral
+  const prefs = [/grok/i, /qwen-max|qwen3|qwen/i, /glm/i, /deepseek/i, /gemini|gemma/i, /llama/i, /mistral|mixtral/i, /gpt/i];
   const usable = (models || []).filter((m) => !GEN_EXCLUDE.test(m));
   const picked = [];
   for (const re of prefs) {
     const hit = usable.find((m) => re.test(m) && !picked.includes(m));
     if (hit) picked.push(hit);
-    if (picked.length >= 4) break;
+    if (picked.length >= 6) break;
   }
-  for (const m of usable) { if (picked.length >= 4) break; if (!picked.includes(m)) picked.push(m); }
-  return picked.slice(0, 4);
+  for (const m of usable) { if (picked.length >= 6) break; if (!picked.includes(m)) picked.push(m); }
+  return picked.slice(0, 6);
 }
 
-const PUTER_RANK = ['gpt-5', 'gpt-4.1', 'gpt-4o', 'gpt-4', 'o4', 'o3', 'claude', 'deepseek', 'llama', 'gemini', 'mistral', 'qwen'];
-function shortlistPuterModels(models) {
-  const list = (models || []).filter((m) => !/embed|tts|whisper|moderation|dall|image/i.test(m));
+// Strongest first; small/nano models sink unless nothing else exists.
+const PUTER_RANK = [
+  'gpt-5', 'gpt-4.1', 'gpt-4o', 'claude-opus', 'claude-sonnet', 'claude-3.7', 'claude',
+  'gemini-2.5', 'gemini', 'o4-mini', 'o4', 'o3', 'llama-4', 'llama', 'mistral-large',
+  'mistral', 'deepseek', 'qwen-max', 'qwen',
+];
+export function shortlistPuterModels(models) {
+  const list = (models || []).filter((m) => !/embed|tts|whisper|moderation|dall|image|speech/i.test(m));
   if (!list.length) return [];
   const rank = (m) => {
-    const i = PUTER_RANK.findIndex((p) => m.toLowerCase().includes(p));
-    return i === -1 ? 99 : i;
+    const low = m.toLowerCase();
+    let i = PUTER_RANK.findIndex((p) => low.includes(p));
+    if (i === -1) i = 99;
+    // push tiny variants down unless they are genuinely ranked (o4-mini stays)
+    if (i < 99 && /mini|nano|lite|tiny|small/.test(low) && !/o4-mini/.test(low)) i += 3;
+    return i;
   };
-  return [...list].sort((a, b) => rank(a) - rank(b)).slice(0, 5);
+  return [...list].sort((a, b) => rank(a) - rank(b)).slice(0, 8);
 }
 
 export function ensureReady() {
@@ -109,8 +125,17 @@ export function ensureReady() {
 
     try {
       const puterModels = shortlistPuterModels(await listPuterModels());
+      if (puterModels.length) {
+        // Discovery worked → drop baked-in puter slots that puter can't confirm,
+        // keep the strongest discovered models.
+        const have = new Set(puterModels.map((m) => m.toLowerCase()));
+        const bakedPuter = all.filter((s) => s.provider === 'puter');
+        for (const s of bakedPuter) {
+          if (!have.has(s.model.toLowerCase())) all.splice(all.indexOf(s), 1);
+        }
+      }
       for (const m of puterModels) {
-        if (`puter:${m}` === 'puter:gpt-4o-mini') continue;
+        if (all.some((s) => s.provider === 'puter' && s.model.toLowerCase() === m.toLowerCase())) continue;
         all.push(createSlot({ id: `puter:${m}`, provider: 'puter', carrier: 'puter', model: m, label: `Puter · ${m}`, tier: 2, minIntervalMs: 3500 }));
       }
     } catch { /* optional tier */ }

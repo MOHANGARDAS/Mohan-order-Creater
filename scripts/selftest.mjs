@@ -88,6 +88,90 @@ const T0 = 1_790_000_000_000;
   check('free again after interval', slotStatus(a, T0 + 6000).state, 'ready');
 }
 
+// ====== v2 STRONG STACK tests ======
+import { detectLang } from '../web/src/lib/lang.js';
+import { remember, getFacts, forgetAll, memoryBlock } from '../web/src/lib/memory.js';
+import { systemPrompt, buildChatPayload, shouldAutoImage } from '../web/src/engine/persona.js';
+import { boostPrompt } from '../web/src/engine/images.js';
+import { shortlistPuterModels, shortlistGenModels } from '../web/src/engine/engine.js';
+
+// 9. Language Lock detection
+{
+  check('Devanagari → Hindi lock', detectLang('आप कैसे हैं?').code, 'hi');
+  check('Hinglish detected', detectLang('kaise ho bhai, kya haal hai').code, 'hi-latin');
+  check('plain English stays English', detectLang('What is quantum computing?').code, 'en');
+  check('Arabic script detected', detectLang('كيف حالك اليوم').code, 'ar');
+  const lock = detectLang('mujhe ek website banao').lock;
+  check('Hinglish lock forbids Devanagari', /Roman\/Latin script/.test(lock), true);
+}
+
+// 10. MOHAN Memory — learn, dedupe, block
+{
+  forgetAll();
+  const a = remember('mera naam Raj hai');
+  check('learns naam from Hinglish', a.some((f) => f.k === 'naam' && /raj/i.test(f.v)), true);
+  const b = remember('my name is Raj'); // same fact, different phrasing → no dup
+  check('no duplicate facts across phrasings', b.filter((f) => f.k === 'naam').length, 0);
+  remember('mujhe cricket pasand hai');
+  remember('yaad rakho: office Monday se open hoga');
+  const facts = getFacts();
+  check('pasand learned', facts.some((f) => f.k === 'pasand' && /cricket/i.test(f.v)), true);
+  check('explicit note learned', facts.some((f) => f.k === 'note' && /office/i.test(f.v)), true);
+  const blk = memoryBlock();
+  check('memory block lists facts', /naam: Raj/.test(blk) && /cricket/.test(blk), true);
+  check("feelings don't become names", remember('i am fine').length, 0);
+  forgetAll();
+  check('forgetAll clears memory', getFacts().length, 0);
+}
+
+// 11. persona payload — language lock + memory + window
+{
+  const hist = [
+    { role: 'user', content: 'kaise ho bhai' },
+    { role: 'assistant', content: 'Main badhiya hoon!' },
+  ];
+  const payload = buildChatPayload(hist, 'chat', { memory: '- naam: Raj' });
+  const sys = payload[0].content;
+  check('lock injected (Hinglish)', /LANGUAGE LOCK/.test(sys) && /Hinglish/.test(sys), true);
+  check('memory injected', /naam: Raj/.test(sys), true);
+  check('quality bar present', /TOP-TIER model/.test(sys), true);
+  // long history digest
+  const long = [];
+  for (let i = 0; i < 30; i++) long.push({ role: 'user', content: `topic-${i}` }, { role: 'assistant', content: 'ok' });
+  const lp = buildChatPayload(long, 'chat');
+  check('history window respected (≤26 incl digest)', lp.length <= 27, true);
+  check('older topics digested', lp[1] && lp[1].content.includes('topic-5'), true);
+}
+
+// 12. auto image intent routing
+{
+  check('"Generate an image" routes to image engine', shouldAutoImage('Generate an image of Mumbai skyline'), true);
+  check('Hinglish image request routes', shouldAutoImage('ek poster banao cricket ka'), true);
+  check('"photo chahiye" routes', shouldAutoImage('Mumbai skyline ki photo chahiye'), true);
+  check('coding image question does NOT route', shouldAutoImage('HTML me image kaise lagate hain?'), false);
+  check('sheet request does NOT route to image', shouldAutoImage('excel sheet banao budget ki'), false);
+}
+
+// 13. cinematic image prompt booster
+{
+  const bare = boostPrompt('a cat on the moon');
+  check('bare prompt gets cinematic boost', /cinematic lighting/.test(bare), true);
+  const styled = boostPrompt('a cat on the moon, watercolor painting style');
+  check('styled prompt passes through untouched', styled, 'a cat on the moon, watercolor painting style');
+}
+
+// 14. strong-first model shortlists
+{
+  const puter = shortlistPuterModels(['gpt-4o-mini', 'claude-sonnet-4', 'gpt-5', 'llama-4-maverick', 'o4-mini', 'gemini-2.5-flash', 'mistral-large', 'some-unknown-model']);
+  check('frontier models ranked before mini', puter.indexOf('gpt-5') < puter.indexOf('gpt-4o-mini'), true);
+  check('claude ranked before unknown', puter.indexOf('claude-sonnet-4') < puter.indexOf('some-unknown-model'), true);
+  check('puter shortlist capped at 8', puter.length <= 8, true);
+  const gen = shortlistGenModels(['grok-4', 'qwen-max', 'flux-image', 'glm-4.5', 'deepseek-v3', 'llama-4', 'mistral-medium', 'random-thing']);
+  check('gen shortlist strong-first (grok first)', gen[0], 'grok-4');
+  check('gen shortlist excludes image models', gen.includes('flux-image'), false);
+  check('gen shortlist capped at 6', gen.length <= 6, true);
+}
+
 if (fails) {
   console.error(`\n${fails} test(s) failed`);
   process.exit(1);
