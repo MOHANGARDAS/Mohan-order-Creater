@@ -1,10 +1,26 @@
-# 🟣 MOHAN — Free Multi-Model AI (zero keys, zero cost, auto-rotating)
+# 🟣 MOHAN v2 — Free Multi-Model AI (strong stack, zero keys, zero cost)
 
 > 🔴 **LIVE:** **https://mohangardas.github.io/Mohan-order-Creater/** (GitHub Pages se direct)
 
-**MOHAN** (Multi-Orbit Hybrid AI Nexus) ek ChatGPT/Gemini jaisi AI website hai — but with a
+**MOHAN** (Multi-Orbit Hybrid AI Nexus) ek ChatGPT/Gemini-class AI website hai — but with a
 **self-healing, keyless AI engine** built-in. Koi API key arrange karne ki zaroorat **nahi**,
 koi signup **nahi**, koi paise **nahi**. Bas chalao aur use karo.
+
+## 🆕 v2 Strong Stack
+
+- 💪 **Frontier-first rotation** — Claude Sonnet 4 / Opus, GPT-5 / GPT-4.1 / GPT-4o,
+  Gemini 2.5 Flash, Llama 4, Mistral Large, o4-mini (Puter.js) + grok / qwen-max / GLM /
+  DeepSeek (Pollinations+). Mini/nano models sirf speed-fallback. Limit aaye to **next
+  frontier model** pe auto-switch.
+- 🧠 **MOHAN Memory** — "mera naam Raj hai", "mujhe cricket pasand hai", "yaad rakho: …"
+  bolte hi seekh leta hai; har reply me yaad rakhta hai (localStorage, privacy-safe).
+- 🔒 **Language Lock** — Devanagari Hindi → Devanagari jawab, Hinglish → Roman Hindi,
+  English → English; Bengali/Tamil/Telugu/Gujarati/Urdu/Arabic/CJK bhi mirror hote hain.
+- 🎯 **Auto intent routing** — "Generate an image of…" AUTO mode me seedha image engine
+  jaata hai (text reply nahi).
+- 🎬 **Cinematic prompt booster** — bare prompts me automatic quality qualifiers
+  (lighting/composition/detail), styled prompts untouched.
+- 📚 **Deeper context** — 24-message window + purani conversation ka topic digest.
 
 ## ✨ Features
 

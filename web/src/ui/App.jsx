@@ -7,9 +7,10 @@ import EmptyState from './EmptyState.jsx';
 import Composer from './Composer.jsx';
 import { Toasts, useToasts } from './Toast.jsx';
 import { uid, titleOf, loadChats, saveChats, loadSettings, saveSettings } from '../lib/store.js';
+import { remember, memoryBlock } from '../lib/memory.js';
 import * as engine from '../engine/engine.js';
 import { generateImage } from '../engine/images.js';
-import { buildChatPayload } from '../engine/persona.js';
+import { buildChatPayload, shouldAutoImage } from '../engine/persona.js';
 import { renderAnswer } from '../lib/markdown.js';
 import { openPrint } from '../lib/files.js';
 
@@ -105,7 +106,7 @@ export default function App() {
     const history = (c ? c.messages : [])
       .filter((m) => m.id !== msgId && m.content && (m.role === 'user' || m.role === 'assistant'))
       .map((m) => ({ role: m.role, content: m.content.slice(0, 6000) }));
-    const payload = buildChatPayload(history, mMode);
+    const payload = buildChatPayload(history, mMode, { memory: memoryBlock() });
     try {
       const res = await engine.chat({
         messages: payload,
@@ -156,7 +157,11 @@ export default function App() {
   const send = useCallback(async (text, m) => {
     const t = (text || '').trim();
     if (!t || busyRef.current) return;
-    const useMode = m || 'auto';
+    // 🧠 MOHAN Memory — learn from every user message (naam/pasand/yaad-rakho…)
+    const learned = remember(t);
+    if (learned.length) toast(`🧠 Yaad rakh liya: ${learned.map((f) => f.k).join(', ')}`);
+    // 🎯 Auto intent routing — picture/photo requests in AUTO mode go to the image engine
+    const useMode = m || (shouldAutoImage(t) ? 'image' : 'auto');
     let cid = activeRef.current && storeRef.current.items[activeRef.current] ? activeRef.current : null;
     if (!cid) {
       const id = uid();

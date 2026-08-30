@@ -1,6 +1,6 @@
 {
   "name": "mohan-ai",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "MOHAN — free multi-model AI chat (ChatGPT-style). Zero API keys, zero cost: built-in keyless AI providers with automatic rotation, cooldown and self-healing. Chat, images, Excel, PDF, code — multilingual.",
